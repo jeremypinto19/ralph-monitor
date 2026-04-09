@@ -5,6 +5,7 @@ import {
   useState,
   useMemo,
   useCallback,
+  useRef,
   Fragment,
   useSyncExternalStore,
 } from "react";
@@ -33,6 +34,8 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
   ChevronDown,
+  ChevronLeft,
+  ChevronRight,
   ExternalLink,
   Keyboard,
   ListOrdered,
@@ -65,6 +68,8 @@ interface UserJourney {
 }
 
 type ConvWithShop = AiConversation & { shopName: string };
+
+const CONVERSATIONS_PAGE_SIZE = 100;
 
 const ATTRIBUTION_COLORS: Record<string, string> = {
   direct: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
@@ -449,6 +454,7 @@ export default function ConversationsPage() {
   >("all");
   const [search, setSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(true);
+  const [tablePage, setTablePage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Enrichment state
@@ -465,11 +471,15 @@ export default function ConversationsPage() {
   const [journeyRetryingId, setJourneyRetryingId] = useState<string | null>(
     null,
   );
+  const [posthogRowCacheToken, setPosthogRowCacheToken] = useState<
+    string | null
+  >(null);
 
   useEffect(() => {
     let cancelled = false;
     void (async () => {
       setLoading(true);
+      setPosthogRowCacheToken(null);
       const params = new URLSearchParams();
       params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
       params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
@@ -482,6 +492,11 @@ export default function ConversationsPage() {
         const d = await r.json();
         if (!cancelled) {
           setGroups(d.groups ?? []);
+          setPosthogRowCacheToken(
+            typeof d.posthogRowCacheToken === "string"
+              ? d.posthogRowCacheToken
+              : null,
+          );
           setEnrichments({});
           setJourneys({});
         }
@@ -524,26 +539,53 @@ export default function ConversationsPage() {
     );
   }, [groups, search, hideEmpty]);
 
+  useEffect(() => {
+    setTablePage(0);
+  }, [shop, dateFrom, dateTo, device, launchSource, search, hideEmpty]);
+
+  useEffect(() => {
+    const max = Math.max(
+      0,
+      Math.ceil(allConversations.length / CONVERSATIONS_PAGE_SIZE) - 1,
+    );
+    setTablePage((p) => Math.min(p, max));
+  }, [allConversations.length]);
+
+  const conversationPageCount = Math.max(
+    1,
+    Math.ceil(allConversations.length / CONVERSATIONS_PAGE_SIZE) || 1,
+  );
+  const conversationPage = Math.min(tablePage, conversationPageCount - 1);
+
+  const pagedConversations = useMemo(() => {
+    const start = conversationPage * CONVERSATIONS_PAGE_SIZE;
+    return allConversations.slice(start, start + CONVERSATIONS_PAGE_SIZE);
+  }, [allConversations, conversationPage]);
+
+  const pagedConversationsRef = useRef<ConvWithShop[]>(pagedConversations);
+  pagedConversationsRef.current = pagedConversations;
+
   const bundleConversationKey = useMemo(() => {
-    return allConversations
+    return pagedConversations
       .filter((c) => c.messageCount > 0)
-      .slice(0, 100)
+      .slice(0, CONVERSATIONS_PAGE_SIZE)
       .map((c) => c.conversationId)
       .sort()
       .join(",");
-  }, [allConversations]);
+  }, [pagedConversations]);
 
   useEffect(() => {
+    if (loading) {
+      return;
+    }
     if (bundleConversationKey.length === 0) {
-      setJourneys({});
-      setEnrichments({});
       setJourneysBulkLoading(false);
       return;
     }
 
     const ids = bundleConversationKey.split(",").filter(Boolean);
     const convById = new Map<string, ConvWithShop>();
-    for (const c of allConversations) {
+    for (const c of pagedConversationsRef.current) {
       if (ids.includes(c.conversationId)) convById.set(c.conversationId, c);
     }
 
@@ -584,6 +626,7 @@ export default function ConversationsPage() {
             dateTo: format(dateTo, "yyyy-MM-dd"),
             conversations,
             eventsByConversationId,
+            ...(posthogRowCacheToken ? { posthogRowCacheToken } : {}),
           }),
         });
         const d = await r.json();
@@ -593,10 +636,16 @@ export default function ConversationsPage() {
           return;
         }
         if (d.journeys && typeof d.journeys === "object") {
-          setJourneys(d.journeys as Record<string, UserJourney | null>);
+          setJourneys((prev) => ({
+            ...prev,
+            ...(d.journeys as Record<string, UserJourney | null>),
+          }));
         }
         if (d.enrichments && typeof d.enrichments === "object") {
-          setEnrichments(d.enrichments);
+          setEnrichments((prev) => ({
+            ...prev,
+            ...(d.enrichments as Record<string, ConversationEnrichment>),
+          }));
         }
       } catch (err) {
         console.error(err);
@@ -610,7 +659,7 @@ export default function ConversationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [bundleConversationKey, dateFrom, dateTo, allConversations]);
+  }, [loading, bundleConversationKey, dateFrom, dateTo, posthogRowCacheToken]);
 
   const toggleExpand = useCallback(
     (conv: ConvWithShop) => {
@@ -790,7 +839,7 @@ export default function ConversationsPage() {
                 </TableRow>
               ))}
             {!loading &&
-              allConversations.slice(0, 100).map((c) => {
+              pagedConversations.map((c) => {
                 const enrichment = enrichments[c.conversationId];
                 const isExpanded = expandedId === c.conversationId;
                 return (
@@ -893,6 +942,12 @@ export default function ConversationsPage() {
                                       );
                                       const displayText =
                                         parsed.text || JSON.stringify(e.data);
+                                      const messageModeFromData = String(
+                                        (e.data as Record<string, unknown>)
+                                          .mode ?? "",
+                                      ).trim();
+                                      const messageModeLabel =
+                                        messageModeFromData || (c.mode ?? "");
                                       const showRalphPayload =
                                         !isUser &&
                                         (parsed.recommendations.length > 0 ||
@@ -917,6 +972,14 @@ export default function ConversationsPage() {
                                                 "HH:mm:ss",
                                               )}
                                             </span>
+                                            {isUser && messageModeLabel && (
+                                              <Badge
+                                                variant="secondary"
+                                                className="h-5 px-1.5 text-[10px] font-normal capitalize opacity-90"
+                                              >
+                                                {messageModeLabel}
+                                              </Badge>
+                                            )}
                                             {!isUser && parsed.lang && (
                                               <Badge
                                                 variant="outline"
@@ -1108,6 +1171,48 @@ export default function ConversationsPage() {
             )}
           </TableBody>
         </Table>
+        {!loading && allConversations.length > 0 && (
+          <div className="flex flex-col gap-3 border-t px-4 py-3 text-sm text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+            <span>
+              Page {conversationPage + 1} of {conversationPageCount}
+              {" · "}
+              Showing {conversationPage * CONVERSATIONS_PAGE_SIZE + 1}–
+              {Math.min(
+                (conversationPage + 1) * CONVERSATIONS_PAGE_SIZE,
+                allConversations.length,
+              )}{" "}
+              of {allConversations.length}
+            </span>
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={conversationPage <= 0}
+                onClick={() => setTablePage((p) => Math.max(0, p - 1))}
+                aria-label="Previous page"
+              >
+                <ChevronLeft className="h-4 w-4" aria-hidden />
+                Previous
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={conversationPage >= conversationPageCount - 1}
+                onClick={() =>
+                  setTablePage((p) =>
+                    Math.min(conversationPageCount - 1, p + 1),
+                  )
+                }
+                aria-label="Next page"
+              >
+                Next
+                <ChevronRight className="h-4 w-4" aria-hidden />
+              </Button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -1,6 +1,9 @@
 import { NextResponse } from "next/server";
 import { queryPostHog } from "@/lib/posthog";
-import { handleBatchJourneys } from "@/lib/conversation-posthog-bundle";
+import {
+  handleBatchJourneys,
+  HOGQL_DATA_CONVERSATION_ID,
+} from "@/lib/conversation-posthog-bundle";
 
 const EVENT_LABELS: Record<string, string> = {
   just_ai_trigger_bar_expanded: "Opened trigger bar",
@@ -162,7 +165,14 @@ async function resolveDistinctId(
   startedAt: string,
 ): Promise<string | null> {
   const ts = new Date(startedAt);
-  console.log("[resolveDistinctId] shopId:", shopId, "startedAt:", startedAt, "timestamp:", ts);
+  console.log(
+    "[resolveDistinctId] shopId:",
+    shopId,
+    "startedAt:",
+    startedAt,
+    "timestamp:",
+    ts,
+  );
 
   // PostHog interprets bare datetime strings as Europe/Paris (project tz).
   // DynamoDB startedAt is UTC. We need to shift to Paris time for the query window.
@@ -202,7 +212,14 @@ async function resolveDistinctId(
     const did = row[0] as string;
     const unixTs = row[1] as number;
     const diff = Math.abs(unixTs - targetUnix);
-    console.log("[resolveDistinctId] Checking did:", did, "unixTs:", unixTs, "diff:", diff);
+    console.log(
+      "[resolveDistinctId] Checking did:",
+      did,
+      "unixTs:",
+      unixTs,
+      "diff:",
+      diff,
+    );
     if (diff <= 60 && (!best || diff < best.diff)) {
       best = { did, diff };
     }
@@ -230,7 +247,16 @@ function stepsFromPostHogRows(results: unknown[][]): TimelineStep[] {
     const timestamp = row[1] as string;
     const dataJson = row[2] as string;
     const details = extractDetails(event, dataJson);
-    console.log("[stepsFromPostHogRows] Event:", event, "Timestamp:", timestamp, "Data:", dataJson, "Details:", details);
+    console.log(
+      "[stepsFromPostHogRows] Event:",
+      event,
+      "Timestamp:",
+      timestamp,
+      "Data:",
+      dataJson,
+      "Details:",
+      details,
+    );
     steps.push({
       time: timestamp,
       event,
@@ -305,16 +331,19 @@ function buildJourneyJson(
 async function fetchDistinctIdForConversation(
   conversationId: string,
 ): Promise<string | null> {
-  console.log('[fetchDistinctIdForConversation] Fetching distinct_id for conversationId:', conversationId);
+  console.log(
+    "[fetchDistinctIdForConversation] Fetching distinct_id for conversationId:",
+    conversationId,
+  );
   const result = await queryPostHog(`
     SELECT distinct_id
     FROM events
     WHERE event = 'just_ai_session_started'
-      AND JSONExtractString(properties, 'conversationId') = ${hogqlQuote(conversationId)}
+      AND ${HOGQL_DATA_CONVERSATION_ID} = ${hogqlQuote(conversationId)}
     ORDER BY timestamp ASC
     LIMIT 1
   `);
-  console.log('[fetchDistinctIdForConversation] Query result:', result);
+  console.log("[fetchDistinctIdForConversation] Query result:", result);
   const did = result.results[0]?.[0] as string | undefined;
   return did ?? null;
 }
@@ -344,11 +373,16 @@ export async function GET(request: Request) {
     const shopId = searchParams.get("shopId") ?? "";
     const startedAt = searchParams.get("startedAt") ?? "";
 
-    console.log("[GET] Params:",
-      "conversationId:", conversationId,
-      "distinctId:", distinctIdParam,
-      "shopId:", shopId,
-      "startedAt:", startedAt
+    console.log(
+      "[GET] Params:",
+      "conversationId:",
+      conversationId,
+      "distinctId:",
+      distinctIdParam,
+      "shopId:",
+      shopId,
+      "startedAt:",
+      startedAt,
     );
 
     let steps: TimelineStep[] = [];
@@ -362,19 +396,27 @@ export async function GET(request: Request) {
         timestamp,
         JSONExtractString(properties, 'data') AS data_json
       FROM events
-      WHERE JSONExtractString(properties, 'conversationId') = ${hogqlQuote(conversationId)}
+      WHERE ${HOGQL_DATA_CONVERSATION_ID} = ${hogqlQuote(conversationId)}
         AND ${JOURNEY_EVENTS_FILTER}
         AND timestamp >= ${dateFromQ}
         AND timestamp <= ${dateToQ}
       ORDER BY timestamp ASC
       LIMIT ${JOURNEY_MAX_EVENTS_PER_CONVERSATION}
     `);
-      console.log("[GET] Events fetched by conversationId:", byConv?.results?.length, "events:", byConv.results);
+      console.log(
+        "[GET] Events fetched by conversationId:",
+        byConv?.results?.length,
+        "events:",
+        byConv.results,
+      );
       steps = stepsFromPostHogRows(byConv.results);
       resolvedDistinctId =
         (await fetchDistinctIdForConversation(conversationId)) ?? undefined;
       if (resolvedDistinctId) {
-        console.log("[GET] Resolved distinctId for conversationId:", resolvedDistinctId);
+        console.log(
+          "[GET] Resolved distinctId for conversationId:",
+          resolvedDistinctId,
+        );
       } else {
         console.log("[GET] Could not resolve distinctId for conversationId");
       }
@@ -382,7 +424,11 @@ export async function GET(request: Request) {
       let distinctId = distinctIdParam ?? "";
 
       if (!distinctId && shopId && startedAt) {
-        console.log("[GET] Trying to resolve distinctId from shopId and startedAt:", shopId, startedAt);
+        console.log(
+          "[GET] Trying to resolve distinctId from shopId and startedAt:",
+          shopId,
+          startedAt,
+        );
         distinctId = (await resolveDistinctId(shopId, startedAt)) ?? "";
         console.log("[GET] resolveDistinctId result:", distinctId);
       }
@@ -414,11 +460,19 @@ export async function GET(request: Request) {
       LIMIT ${JOURNEY_MAX_EVENTS_PER_CONVERSATION}
     `);
 
-      console.log("[GET] Events fetched by distinctId:", result?.results?.length, "events:", result.results);
+      console.log(
+        "[GET] Events fetched by distinctId:",
+        result?.results?.length,
+        "events:",
+        result.results,
+      );
       steps = stepsFromPostHogRows(result.results);
     }
 
-    console.log("[GET] Returning journey json:", { stepsLength: steps.length, resolvedDistinctId });
+    console.log("[GET] Returning journey json:", {
+      stepsLength: steps.length,
+      resolvedDistinctId,
+    });
     return NextResponse.json(buildJourneyJson(steps, resolvedDistinctId));
   } catch (err) {
     console.error("[API /user-journey]", err);

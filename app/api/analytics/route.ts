@@ -1,11 +1,14 @@
 import { NextResponse } from "next/server";
 import { scanTable } from "@/lib/dynamo";
+import { HOGQL_DATA_MODE } from "@/lib/conversation-posthog-bundle";
 import { queryPostHog } from "@/lib/posthog";
 import type { AnalyticsData, AnalyticsDimension } from "@/lib/types";
 
 /** PostHog interprets bare datetime strings as Europe/Paris (project tz). */
 function utcToParis(d: Date): string {
-  return d.toLocaleString("sv-SE", { timeZone: "Europe/Paris" }).replace("T", " ");
+  return d
+    .toLocaleString("sv-SE", { timeZone: "Europe/Paris" })
+    .replace("T", " ");
 }
 
 interface QuestionRecord {
@@ -20,89 +23,230 @@ const CATEGORIES: { name: string; patterns: RegExp[] }[] = [
   {
     name: "Shipping & Delivery",
     patterns: [
-      /livraison/i, /expédition/i, /expedition/i, /shipping/i, /delivery/i,
-      /délai/i, /delai/i, /envo[iy]/i, /colis/i, /suivi/i, /tracking/i,
-      /livré/i, /livre/i, /recevoir/i, /quand.*arriv/i, /combien.*temps/i,
-      /frais.*port/i, /mondial\s*relay/i, /colissimo/i, /chronopost/i,
-      /point\s*relais/i, /retrait/i, /click.*collect/i,
+      /livraison/i,
+      /expédition/i,
+      /expedition/i,
+      /shipping/i,
+      /delivery/i,
+      /délai/i,
+      /delai/i,
+      /envo[iy]/i,
+      /colis/i,
+      /suivi/i,
+      /tracking/i,
+      /livré/i,
+      /livre/i,
+      /recevoir/i,
+      /quand.*arriv/i,
+      /combien.*temps/i,
+      /frais.*port/i,
+      /mondial\s*relay/i,
+      /colissimo/i,
+      /chronopost/i,
+      /point\s*relais/i,
+      /retrait/i,
+      /click.*collect/i,
     ],
   },
   {
     name: "Sizing & Fit",
     patterns: [
-      /taille/i, /size/i, /sizing/i, /mesure/i, /fit/i, /pointure/i,
-      /grand/i, /petit/i, /large/i, /small/i, /medium/i, /guide.*taille/i,
-      /trop\s*(grand|petit)/i, /correspond/i, /mensuration/i, /cm/i,
+      /taille/i,
+      /size/i,
+      /sizing/i,
+      /mesure/i,
+      /fit/i,
+      /pointure/i,
+      /grand/i,
+      /petit/i,
+      /large/i,
+      /small/i,
+      /medium/i,
+      /guide.*taille/i,
+      /trop\s*(grand|petit)/i,
+      /correspond/i,
+      /mensuration/i,
+      /cm/i,
     ],
   },
   {
     name: "Product Variants & Colors",
     patterns: [
-      /couleur/i, /color/i, /colour/i, /variante/i, /variant/i,
-      /noir/i, /blanc/i, /rouge/i, /bleu/i, /rose/i, /vert/i,
-      /disponible.*en/i, /existe.*en/i, /other.*color/i, /autre.*couleur/i,
-      /motif/i, /pattern/i, /matière/i, /tissu/i, /fabric/i,
+      /couleur/i,
+      /color/i,
+      /colour/i,
+      /variante/i,
+      /variant/i,
+      /noir/i,
+      /blanc/i,
+      /rouge/i,
+      /bleu/i,
+      /rose/i,
+      /vert/i,
+      /disponible.*en/i,
+      /existe.*en/i,
+      /other.*color/i,
+      /autre.*couleur/i,
+      /motif/i,
+      /pattern/i,
+      /matière/i,
+      /tissu/i,
+      /fabric/i,
     ],
   },
   {
     name: "Price & Promotions",
     patterns: [
-      /prix/i, /price/i, /promo/i, /réduction/i, /reduction/i, /solde/i,
-      /discount/i, /code/i, /coupon/i, /offre/i, /offer/i, /gratuit/i,
-      /free/i, /cher/i, /expensive/i, /budget/i, /moins.*cher/i,
-      /combien/i, /how\s*much/i, /cost/i, /€/i, /euro/i,
+      /prix/i,
+      /price/i,
+      /promo/i,
+      /réduction/i,
+      /reduction/i,
+      /solde/i,
+      /discount/i,
+      /code/i,
+      /coupon/i,
+      /offre/i,
+      /offer/i,
+      /gratuit/i,
+      /free/i,
+      /cher/i,
+      /expensive/i,
+      /budget/i,
+      /moins.*cher/i,
+      /combien/i,
+      /how\s*much/i,
+      /cost/i,
+      /€/i,
+      /euro/i,
     ],
   },
   {
     name: "Stock & Availability",
     patterns: [
-      /stock/i, /disponib/i, /availab/i, /rupture/i, /out.*stock/i,
-      /reste/i, /en\s*stock/i, /quand.*retour/i, /restock/i,
-      /back\s*in/i, /épuisé/i, /epuise/i, /sold\s*out/i,
+      /stock/i,
+      /disponib/i,
+      /availab/i,
+      /rupture/i,
+      /out.*stock/i,
+      /reste/i,
+      /en\s*stock/i,
+      /quand.*retour/i,
+      /restock/i,
+      /back\s*in/i,
+      /épuisé/i,
+      /epuise/i,
+      /sold\s*out/i,
     ],
   },
   {
     name: "Returns & Exchanges",
     patterns: [
-      /retour/i, /return/i, /échange/i, /exchange/i, /rembours/i,
-      /refund/i, /renvoy/i, /renvoyer/i, /satisfait/i, /garantie/i,
-      /warranty/i, /politique.*retour/i, /return.*policy/i,
+      /retour/i,
+      /return/i,
+      /échange/i,
+      /exchange/i,
+      /rembours/i,
+      /refund/i,
+      /renvoy/i,
+      /renvoyer/i,
+      /satisfait/i,
+      /garantie/i,
+      /warranty/i,
+      /politique.*retour/i,
+      /return.*policy/i,
     ],
   },
   {
     name: "Product Recommendations",
     patterns: [
-      /recommand/i, /recommend/i, /suggest/i, /conseil/i,
-      /cherche/i, /looking\s*for/i, /besoin/i, /need/i,
-      /idée/i, /idea/i, /cadeau/i, /gift/i, /pour\s*(un|une|mon|ma)/i,
-      /quoi.*offrir/i, /quel.*(produit|article)/i, /meilleur/i, /best/i,
-      /populaire/i, /popular/i, /tendance/i, /nouveau/i,
+      /recommand/i,
+      /recommend/i,
+      /suggest/i,
+      /conseil/i,
+      /cherche/i,
+      /looking\s*for/i,
+      /besoin/i,
+      /need/i,
+      /idée/i,
+      /idea/i,
+      /cadeau/i,
+      /gift/i,
+      /pour\s*(un|une|mon|ma)/i,
+      /quoi.*offrir/i,
+      /quel.*(produit|article)/i,
+      /meilleur/i,
+      /best/i,
+      /populaire/i,
+      /popular/i,
+      /tendance/i,
+      /nouveau/i,
     ],
   },
   {
     name: "Order & Payment",
     patterns: [
-      /commande/i, /order/i, /paiement/i, /payment/i, /pay/i,
-      /carte/i, /card/i, /paypal/i, /virement/i, /facture/i,
-      /invoice/i, /confirmation/i, /annul/i, /cancel/i,
-      /modifi/i, /modify/i, /changer.*commande/i, /apple\s*pay/i,
+      /commande/i,
+      /order/i,
+      /paiement/i,
+      /payment/i,
+      /pay/i,
+      /carte/i,
+      /card/i,
+      /paypal/i,
+      /virement/i,
+      /facture/i,
+      /invoice/i,
+      /confirmation/i,
+      /annul/i,
+      /cancel/i,
+      /modifi/i,
+      /modify/i,
+      /changer.*commande/i,
+      /apple\s*pay/i,
     ],
   },
   {
     name: "Product Care & Details",
     patterns: [
-      /entretien/i, /care/i, /lav/i, /wash/i, /nettoy/i, /clean/i,
-      /composition/i, /matériau/i, /material/i, /dimension/i,
-      /poids/i, /weight/i, /détail/i, /detail/i, /description/i,
-      /comment.*utilis/i, /how.*use/i, /instruction/i,
+      /entretien/i,
+      /care/i,
+      /lav/i,
+      /wash/i,
+      /nettoy/i,
+      /clean/i,
+      /composition/i,
+      /matériau/i,
+      /material/i,
+      /dimension/i,
+      /poids/i,
+      /weight/i,
+      /détail/i,
+      /detail/i,
+      /description/i,
+      /comment.*utilis/i,
+      /how.*use/i,
+      /instruction/i,
     ],
   },
   {
     name: "Account & Loyalty",
     patterns: [
-      /compte/i, /account/i, /connecter/i, /login/i, /mot.*passe/i,
-      /password/i, /fidélit/i, /loyalty/i, /points/i, /membre/i,
-      /member/i, /inscri/i, /register/i, /newsletter/i, /parrainage/i,
+      /compte/i,
+      /account/i,
+      /connecter/i,
+      /login/i,
+      /mot.*passe/i,
+      /password/i,
+      /fidélit/i,
+      /loyalty/i,
+      /points/i,
+      /membre/i,
+      /member/i,
+      /inscri/i,
+      /register/i,
+      /newsletter/i,
+      /parrainage/i,
     ],
   },
 ];
@@ -157,7 +301,9 @@ export async function GET(request: Request) {
     // Enrich device + mode from PostHog when DynamoDB has "unknown"
     try {
       const phFrom = utcToParis(new Date(dateFrom));
-      const phTo = utcToParis(new Date(dateTo.length === 10 ? `${dateTo}T23:59:59Z` : dateTo));
+      const phTo = utcToParis(
+        new Date(dateTo.length === 10 ? `${dateTo}T23:59:59Z` : dateTo),
+      );
       const shopClause = shopFilter
         ? `AND JSONExtractString(properties, 'shopId') = '${shopFilter.replace(/'/g, "\\'")}'`
         : "";
@@ -167,7 +313,7 @@ export async function GET(request: Request) {
           toString(toUnixTimestamp(timestamp)) AS unix_ts,
           properties.\`$device_type\` AS device_type,
           properties.\`$current_url\` AS current_url,
-          JSONExtractString(properties, 'mode') AS mode
+          ${HOGQL_DATA_MODE} AS mode
         FROM events
         WHERE event = 'just_ai_session_started'
           ${shopClause}
@@ -177,14 +323,27 @@ export async function GET(request: Request) {
         LIMIT 50000
       `);
 
-      const phEntries: { shopId: string; unixTs: number; deviceType: string; url: string; mode: string }[] = [];
+      const phEntries: {
+        shopId: string;
+        unixTs: number;
+        deviceType: string;
+        url: string;
+        mode: string;
+      }[] = [];
       for (const row of phResult.results) {
         const sid = row[0] as string;
         const unixTs = parseInt(row[1] as string, 10);
         const dt = (row[2] as string) || "";
         const url = (row[3] as string) || "";
         const mode = (row[4] as string) || "";
-        if (sid) phEntries.push({ shopId: sid, unixTs, deviceType: dt.toLowerCase(), url, mode: mode.toLowerCase() });
+        if (sid)
+          phEntries.push({
+            shopId: sid,
+            unixTs,
+            deviceType: dt.toLowerCase(),
+            url,
+            mode: mode.toLowerCase(),
+          });
       }
 
       // Also fetch widget/message events for mode fallback
@@ -193,7 +352,7 @@ export async function GET(request: Request) {
           JSONExtractString(properties, 'shopId') AS shop_id,
           toString(toUnixTimestamp(timestamp)) AS unix_ts,
           properties.\`$current_url\` AS current_url,
-          JSONExtractString(properties, 'mode') AS mode
+          ${HOGQL_DATA_MODE} AS mode
         FROM events
         WHERE event IN ('just_ai_widget_opened', 'just_ai_trigger_bar_expanded', 'just_ai_message_sent')
           ${shopClause}
@@ -203,13 +362,24 @@ export async function GET(request: Request) {
         LIMIT 50000
       `);
 
-      const widgetEntries: { shopId: string; unixTs: number; url: string; mode: string }[] = [];
+      const widgetEntries: {
+        shopId: string;
+        unixTs: number;
+        url: string;
+        mode: string;
+      }[] = [];
       for (const row of widgetResult.results) {
         const sid = row[0] as string;
         const unixTs = parseInt(row[1] as string, 10);
         const url = (row[2] as string) || "";
         const mode = (row[3] as string) || "";
-        if (sid) widgetEntries.push({ shopId: sid, unixTs, url, mode: mode.toLowerCase() });
+        if (sid)
+          widgetEntries.push({
+            shopId: sid,
+            unixTs,
+            url,
+            mode: mode.toLowerCase(),
+          });
       }
 
       for (const [, meta] of convoMeta) {
@@ -217,17 +387,28 @@ export async function GET(request: Request) {
         const convUnix = Math.floor(new Date(meta.startedAt).getTime() / 1000);
 
         // Match session_started events (±300s)
-        let best: { deviceType: string; url: string; mode: string; diff: number } | null = null;
+        let best: {
+          deviceType: string;
+          url: string;
+          mode: string;
+          diff: number;
+        } | null = null;
         for (const entry of phEntries) {
           if (entry.shopId !== meta.shopId) continue;
           const diff = Math.abs(entry.unixTs - convUnix);
           if (diff <= 300 && (!best || diff < best.diff)) {
-            best = { deviceType: entry.deviceType, url: entry.url, mode: entry.mode, diff };
+            best = {
+              deviceType: entry.deviceType,
+              url: entry.url,
+              mode: entry.mode,
+              diff,
+            };
           }
         }
 
         if (best) {
-          if (meta.device === "unknown" && best.deviceType) meta.device = best.deviceType;
+          if (meta.device === "unknown" && best.deviceType)
+            meta.device = best.deviceType;
           if (meta.mode === "unknown" && best.mode) meta.mode = best.mode;
           if (meta.mode === "unknown" && best.url) {
             meta.mode = /\/products\//i.test(best.url) ? "product" : "search";
@@ -236,18 +417,25 @@ export async function GET(request: Request) {
 
         // Widget/message fallback for mode
         if (meta.mode === "unknown") {
-          let bestWidget: { url: string; mode: string; diff: number } | null = null;
+          let bestWidget: { url: string; mode: string; diff: number } | null =
+            null;
           for (const entry of widgetEntries) {
             if (entry.shopId !== meta.shopId) continue;
             const diff = entry.unixTs - convUnix;
-            if (diff >= -30 && diff <= 600 && (!bestWidget || diff < bestWidget.diff)) {
+            if (
+              diff >= -30 &&
+              diff <= 600 &&
+              (!bestWidget || diff < bestWidget.diff)
+            ) {
               bestWidget = { url: entry.url, mode: entry.mode, diff };
             }
           }
           if (bestWidget?.mode) {
             meta.mode = bestWidget.mode;
           } else if (bestWidget?.url) {
-            meta.mode = /\/products\//i.test(bestWidget.url) ? "product" : "search";
+            meta.mode = /\/products\//i.test(bestWidget.url)
+              ? "product"
+              : "search";
           }
         }
       }
@@ -305,7 +493,12 @@ export async function GET(request: Request) {
       const category = categorize(q.text);
 
       if (!dimMap.has(category)) {
-        dimMap.set(category, { count: 0, examples: [], byDevice: {}, byMode: {} });
+        dimMap.set(category, {
+          count: 0,
+          examples: [],
+          byDevice: {},
+          byMode: {},
+        });
       }
       const dim = dimMap.get(category)!;
       dim.count++;

@@ -182,13 +182,19 @@ export const JOURNEY_EVENTS_FILTER = `(startsWith(event, 'just_ai_')
           'just_checkout_started', 'just_checkout_completed'
         ))`;
 
+/** Just AI events store ids/mode on `properties.data`, not at the root. */
+export const HOGQL_DATA_CONVERSATION_ID =
+  "JSONExtractString(properties, 'data', 'conversationId')";
+export const HOGQL_DATA_MODE = "JSONExtractString(properties, 'data', 'mode')";
+
 export function hogqlQuote(val: string): string {
   return `'${val.replace(/'/g, "\\'")}'`;
 }
 
 export const JOURNEY_MAX_EVENTS_PER_CONVERSATION = 500;
 export const JOURNEY_BATCH_MAX_IDS = 120;
-const JOURNEY_BATCH_QUERY_ROW_CAP = 50_000;
+/** HogQL LIMIT per batch for journey-shaped queries (list + bundle). */
+export const JOURNEY_BATCH_QUERY_ROW_CAP = 50_000;
 const DISTINCT_ID_IN_BATCH = 100;
 const CHECKOUT_ROW_LIMIT = 50_000;
 
@@ -199,6 +205,43 @@ function stepFromBatchRow(row: unknown[]): TimelineStep {
     event,
     details: extractDetails(event, row[3] as string),
   };
+}
+
+/**
+ * Build journey payloads from raw HogQL rows (same column order as handleBatchJourneys:
+ * conversation_id, event, timestamp, data_json, distinct_id; extra trailing columns allowed).
+ */
+export function buildJourneysFromRawRows(
+  results: unknown[][],
+  conversationIds: string[],
+): Record<string, BundleJourneyJson> {
+  const journeys: Record<string, BundleJourneyJson> = {};
+  if (conversationIds.length === 0) return journeys;
+
+  const capped = conversationIds.slice(0, JOURNEY_BATCH_MAX_IDS);
+  const byCid = new Map<string, TimelineStep[]>();
+  const distinctByCid = new Map<string, string>();
+  for (const row of results) {
+    const cid = row[0] as string;
+    if (!cid) continue;
+    const did = row[4] as string;
+    if (did && !distinctByCid.has(cid)) distinctByCid.set(cid, did);
+
+    if (!byCid.has(cid)) byCid.set(cid, []);
+    const list = byCid.get(cid)!;
+    if (list.length >= JOURNEY_MAX_EVENTS_PER_CONVERSATION) continue;
+    list.push(stepFromBatchRow(row));
+  }
+
+  for (const cid of capped) {
+    const steps = byCid.get(cid) ?? [];
+    journeys[cid] = buildJourneyJson(
+      steps,
+      distinctByCid.get(cid) ?? undefined,
+    );
+  }
+
+  return journeys;
 }
 
 export function buildJourneyJson(
@@ -238,8 +281,7 @@ export async function handleBatchJourneys(
   dateFrom: string,
   dateTo: string,
 ): Promise<Record<string, BundleJourneyJson>> {
-  const journeys: Record<string, BundleJourneyJson> = {};
-  if (conversationIds.length === 0) return journeys;
+  if (conversationIds.length === 0) return {};
 
   const capped = conversationIds.slice(0, JOURNEY_BATCH_MAX_IDS);
   const dateFromQ = hogqlQuote(dateFrom);
@@ -248,13 +290,13 @@ export async function handleBatchJourneys(
 
   const eventsResult = await queryPostHog(`
     SELECT
-      JSONExtractString(properties, 'conversationId') AS conversation_id,
+      ${HOGQL_DATA_CONVERSATION_ID} AS conversation_id,
       event,
       timestamp,
       JSONExtractString(properties, 'data') AS data_json,
       distinct_id
     FROM events
-    WHERE JSONExtractString(properties, 'conversationId') IN (${inList})
+    WHERE ${HOGQL_DATA_CONVERSATION_ID} IN (${inList})
       AND ${JOURNEY_EVENTS_FILTER}
       AND timestamp >= ${dateFromQ}
       AND timestamp <= ${dateToQ}
@@ -262,29 +304,7 @@ export async function handleBatchJourneys(
     LIMIT ${JOURNEY_BATCH_QUERY_ROW_CAP}
   `);
 
-  const byCid = new Map<string, TimelineStep[]>();
-  const distinctByCid = new Map<string, string>();
-  for (const row of eventsResult.results) {
-    const cid = row[0] as string;
-    if (!cid) continue;
-    const did = row[4] as string;
-    if (did && !distinctByCid.has(cid)) distinctByCid.set(cid, did);
-
-    if (!byCid.has(cid)) byCid.set(cid, []);
-    const list = byCid.get(cid)!;
-    if (list.length >= JOURNEY_MAX_EVENTS_PER_CONVERSATION) continue;
-    list.push(stepFromBatchRow(row));
-  }
-
-  for (const cid of capped) {
-    const steps = byCid.get(cid) ?? [];
-    journeys[cid] = buildJourneyJson(
-      steps,
-      distinctByCid.get(cid) ?? undefined,
-    );
-  }
-
-  return journeys;
+  return buildJourneysFromRawRows(eventsResult.results, conversationIds);
 }
 
 // --- Enrichment (from enrich) ---
@@ -534,11 +554,11 @@ export async function batchResolveDistinctIdsByConversationId(
 
     const result = await queryPostHog(`
       SELECT
-        JSONExtractString(properties, 'conversationId') AS cid,
+        ${HOGQL_DATA_CONVERSATION_ID} AS cid,
         argMin(distinct_id, timestamp) AS did
       FROM events
       WHERE event = 'just_ai_session_started'
-        AND JSONExtractString(properties, 'conversationId') IN (${inList})
+        AND ${HOGQL_DATA_CONVERSATION_ID} IN (${inList})
       GROUP BY cid
     `);
 
@@ -859,18 +879,29 @@ export async function runConversationPosthogBundle(params: {
   dateTo: string;
   conversationKeys: ConversationBundleKey[];
   eventsByConversationId: Record<string, Record<string, unknown>[]>;
+  /** When set (e.g. from GET /api/conversations row cache), skip journey HogQL. */
+  prefetchedJourneyRows?: unknown[][] | null;
 }): Promise<{
   journeys: Record<string, BundleJourneyJson>;
   enrichments: Record<string, ConversationEnrichment>;
 }> {
-  const { dateFrom, dateTo, conversationKeys, eventsByConversationId } = params;
+  const {
+    dateFrom,
+    dateTo,
+    conversationKeys,
+    eventsByConversationId,
+    prefetchedJourneyRows,
+  } = params;
 
   if (conversationKeys.length === 0) {
     return { journeys: {}, enrichments: {} };
   }
 
   const cids = conversationKeys.map((k) => k.conversationId);
-  const journeys = await handleBatchJourneys(cids, dateFrom, dateTo);
+  const journeys =
+    prefetchedJourneyRows != null
+      ? buildJourneysFromRawRows(prefetchedJourneyRows, cids)
+      : await handleBatchJourneys(cids, dateFrom, dateTo);
 
   const enrichments = await runEnrichmentsPipeline({
     conversationKeys,

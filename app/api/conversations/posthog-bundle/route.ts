@@ -3,6 +3,7 @@ import {
   runConversationPosthogBundle,
   type ConversationBundleKey,
 } from "@/lib/conversation-posthog-bundle";
+import { getPosthogRowCache } from "@/lib/posthog-row-cache";
 
 export async function POST(request: Request) {
   try {
@@ -33,11 +34,19 @@ export async function POST(request: Request) {
       posthogDistinctId: c.posthogDistinctId ?? undefined,
     }));
 
+    const tokenRaw = body.posthogRowCacheToken;
+    const token =
+      typeof tokenRaw === "string" && tokenRaw.trim().length > 0
+        ? tokenRaw.trim()
+        : null;
+    const cachedRows = token ? getPosthogRowCache(token) : null;
+
     const { journeys, enrichments } = await runConversationPosthogBundle({
       dateFrom,
       dateTo,
       conversationKeys,
       eventsByConversationId,
+      prefetchedJourneyRows: cachedRows,
     });
 
     return NextResponse.json({ journeys, enrichments });
