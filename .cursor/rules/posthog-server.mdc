@@ -1,0 +1,12 @@
+---
+description: Server-side PostHog HogQL queries via lib/posthog
+globs: lib/posthog.ts
+alwaysApply: false
+---
+
+# PostHog server API (`lib/posthog.ts`)
+
+- **Env**: `POSTHOG_API_KEY` is required; `getApiKey()` throws if unset.
+- **Centralized config**: project id and `BASE_URL` (`https://us.posthog.com/api/projects`) live in this module. If the PostHog project or host changes, update here only.
+- Use **`queryPostHog(hogql)`** for HogQL; request body shape is `{ query: { kind: "HogQLQuery", query: hogql } }`.
+- On failure, errors should stay **actionable** (status + truncated response text) without dumping full API responses into logs by default.

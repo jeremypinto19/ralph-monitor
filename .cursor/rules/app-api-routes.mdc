@@ -1,0 +1,12 @@
+---
+description: Conventions for App Router API route handlers under app/api
+globs: app/api/**/*.ts
+alwaysApply: false
+---
+
+# API routes (`app/api`)
+
+- Export HTTP handlers (`GET`, `POST`, etc.) for Route Handlers; return **`NextResponse`** from `next/server`.
+- Keep route files **thin**: import helpers from `@/lib/*` (e.g. `dynamo`, `posthog`, types) instead of inlining large query or AWS logic in the route.
+- When sending JSON that includes Dynamo or user-derived data, follow existing patterns for **sanitization** and safe error surfaces (see `app/api/conversations/route.ts` as reference).
+- Prefer consistent error responses: meaningful messages for operators, avoid leaking raw stack traces or secrets in JSON bodies.

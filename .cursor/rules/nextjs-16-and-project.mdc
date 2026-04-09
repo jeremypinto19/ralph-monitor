@@ -1,0 +1,10 @@
+---
+description: Next.js 16 local docs and ralph-monitor basics (paths, purpose)
+alwaysApply: true
+---
+
+# Next.js 16 and project context
+
+- **Next.js 16** differs from older docs and from training cutoffs. Before changing App Router APIs, `next.config`, or file layout, read the bundled guide under `node_modules/next/dist/docs/` and respect deprecation notices.
+- **Ralph Monitor** is an internal dashboard for Ralph AI conversations (see root layout metadata).
+- Use path aliases from the codebase: `@/components`, `@/lib`, `@/components/ui` (see `components.json`).

@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Inter } from "next/font/google";
 import { Geist_Mono } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/sidebar";
 
 const inter = Inter({
   variable: "--font-sans",
@@ -29,12 +28,7 @@ export default function RootLayout({
       lang="en"
       className={`${inter.variable} ${geistMono.variable} h-full`}
     >
-      <body className="flex h-full min-h-screen">
-        <Sidebar />
-        <main className="flex-1 overflow-y-auto bg-background">
-          {children}
-        </main>
-      </body>
+      <body className="flex h-full min-h-screen">{children}</body>
     </html>
   );
 }

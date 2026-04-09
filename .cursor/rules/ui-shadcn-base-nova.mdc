@@ -1,0 +1,14 @@
+---
+description: UI stack — shadcn base-nova, tokens, layout, icons
+globs:
+  - components/**/*.tsx
+  - app/**/*.tsx
+alwaysApply: false
+---
+
+# UI components and pages
+
+- Use **shadcn** primitives from `@/components/ui` (`components.json`: style **base-nova**, RSC, Tailwind in `app/globals.css`). Prefer composing existing UI over one-off raw HTML for controls.
+- Icons: **lucide-react** (see `components.json` `iconLibrary`).
+- Match **layout and chrome** of the app: root layout uses `Sidebar` + `main` scroll region (`app/layout.tsx`). New top-level pages should fit that shell unless there is an explicit product reason not to.
+- Styling: use **Tailwind** and existing **CSS variables** / tokens from `app/globals.css`; keep spacing and typography consistent with nearby components (e.g. `components/sidebar.tsx`, existing cards/tables).

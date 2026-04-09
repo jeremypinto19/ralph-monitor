@@ -1,0 +1,11 @@
+---
+description: Domain types in lib/types and alignment with backend Pydantic models
+globs: lib/types.ts
+alwaysApply: false
+---
+
+# Domain types (`lib/types.ts`)
+
+- Types in this file **mirror Pydantic models** from the Python backend (`main.py`). When you add or change conversation events, shops, checkout, or PostHog result shapes, keep **field names and intent** aligned with that source of truth.
+- Prefer **explicit interfaces** and string-literal unions (e.g. `SourcePage`) where the backend has enums or fixed values.
+- If the backend schema diverges, update **both** sides in coordination—do not only patch the TS side.

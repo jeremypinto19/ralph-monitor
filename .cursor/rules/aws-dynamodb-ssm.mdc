@@ -1,0 +1,15 @@
+---
+description: AWS region, env vars, SSM/STS/DynamoDB invariants for lib/dynamo
+globs: lib/dynamo.ts
+alwaysApply: false
+---
+
+# AWS DynamoDB access (`lib/dynamo.ts`)
+
+- **Region** is fixed at `eu-west-3` (`AWS_REGION` in code). Do not silently switch regions.
+- **Base credentials** (for SSM + STS only): `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` must be set; `baseCredentials()` throws if missing.
+- **SSM parameter names** (source of truth for cross-account read role):
+  - `/mcp/dynamodb-readonly-role-arn/justProd`
+  - `/mcp/dynamodb-readonly-external-id/justProd` (decrypted)
+- Flow: SSM → **STS AssumeRole** (session name `ralph-monitor-*`) → **DynamoDBDocumentClient**. Reuse **`getDynamoClient()`** and exports **`scanTable`**, **`getItem`**, **`resolveShopNames`**; do not add parallel credential or assume-role paths without a deliberate design change.
+- **`resetDynamoClient()`** exists for tests or forcing refresh; default path is the cached client from `getDynamoClient()`.
