@@ -30,7 +30,16 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronDown, Keyboard, Loader2, Zap } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  ChevronDown,
+  ExternalLink,
+  Keyboard,
+  ListOrdered,
+  Loader2,
+  MousePointerClick,
+  Zap,
+} from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   AiConversation,
@@ -221,9 +230,15 @@ function CheckoutBadge({
 function JourneyTimeline({
   journey,
   loading,
+  conversationId,
+  onRetry,
+  retryLoading,
 }: {
-  journey: UserJourney | null;
+  journey: UserJourney | null | undefined;
   loading: boolean;
+  conversationId: string;
+  onRetry: (conversationId: string) => void;
+  retryLoading: boolean;
 }) {
   if (loading) {
     return (
@@ -234,15 +249,47 @@ function JourneyTimeline({
   }
   if (!journey || !journey.resolved) {
     return (
-      <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-        Could not resolve user identity for this conversation.
+      <div className="flex flex-col items-center justify-center gap-3 py-8 text-sm text-muted-foreground">
+        <p>Could not resolve user identity for this conversation.</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={retryLoading}
+          onClick={() => onRetry(conversationId)}
+        >
+          {retryLoading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              Retrying…
+            </>
+          ) : (
+            "Retry user journey"
+          )}
+        </Button>
       </div>
     );
   }
   if (journey.timeline.length === 0) {
     return (
-      <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
-        No PostHog events found for this user.
+      <div className="flex flex-col items-center justify-center gap-3 py-8 text-sm text-muted-foreground">
+        <p>No PostHog events found for this user.</p>
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          disabled={retryLoading}
+          onClick={() => onRetry(conversationId)}
+        >
+          {retryLoading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden />
+              Retrying…
+            </>
+          ) : (
+            "Retry user journey"
+          )}
+        </Button>
       </div>
     );
   }
@@ -415,6 +462,9 @@ export default function ConversationsPage() {
     {},
   );
   const [journeysBulkLoading, setJourneysBulkLoading] = useState(false);
+  const [journeyRetryingId, setJourneyRetryingId] = useState<string | null>(
+    null,
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -446,53 +496,6 @@ export default function ConversationsPage() {
     };
   }, [shop, dateFrom, dateTo, device, launchSource]);
 
-  // Trigger enrichment once conversations load
-  useEffect(() => {
-    if (groups.length === 0) return;
-
-    const allConvos = groups.flatMap((g) =>
-      g.conversations.map((c) => ({
-        conversationId: c.conversationId,
-        shopId: c.shopId,
-        startedAt: c.startedAt ?? "",
-      })),
-    );
-
-    if (allConvos.length === 0) return;
-
-    // Only enrich conversations that have messages (likely to have interesting data)
-    const toEnrich = allConvos.filter((c) => {
-      const group = groups.find((g) => g.shopId === c.shopId);
-      const conv = group?.conversations.find(
-        (co) => co.conversationId === c.conversationId,
-      );
-      return conv && conv.messageCount > 0;
-    });
-
-    if (toEnrich.length === 0) return;
-
-    let cancelled = false;
-    void (async () => {
-      setEnriching(true);
-      try {
-        const r = await fetch("/api/conversations/enrich", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ conversations: toEnrich }),
-        });
-        const d = await r.json();
-        if (!cancelled && d.enrichments) setEnrichments(d.enrichments);
-      } catch (err) {
-        console.error(err);
-      } finally {
-        if (!cancelled) setEnriching(false);
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [groups]);
-
   const allConversations = useMemo(() => {
     let flat: ConvWithShop[] = groups.flatMap((g) =>
       g.conversations.map((c) => ({
@@ -521,8 +524,9 @@ export default function ConversationsPage() {
     );
   }, [groups, search, hideEmpty]);
 
-  const journeyBatchIdKey = useMemo(() => {
+  const bundleConversationKey = useMemo(() => {
     return allConversations
+      .filter((c) => c.messageCount > 0)
       .slice(0, 100)
       .map((c) => c.conversationId)
       .sort()
@@ -530,36 +534,83 @@ export default function ConversationsPage() {
   }, [allConversations]);
 
   useEffect(() => {
-    if (journeyBatchIdKey.length === 0) {
+    if (bundleConversationKey.length === 0) {
       setJourneys({});
+      setEnrichments({});
       setJourneysBulkLoading(false);
       return;
     }
 
-    const ids = journeyBatchIdKey.split(",").filter(Boolean);
+    const ids = bundleConversationKey.split(",").filter(Boolean);
+    const convById = new Map<string, ConvWithShop>();
+    for (const c of allConversations) {
+      if (ids.includes(c.conversationId)) convById.set(c.conversationId, c);
+    }
+
     let cancelled = false;
     void (async () => {
       setJourneysBulkLoading(true);
+      setEnriching(true);
       try {
-        const params = new URLSearchParams();
-        params.set("conversationIds", ids.join(","));
-        params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
-        params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
-        const r = await fetch(`/api/user-journey?${params}`);
+        const conversations = ids.map((id) => {
+          const c = convById.get(id)!;
+          return {
+            conversationId: c.conversationId,
+            shopId: c.shopId,
+            startedAt: c.startedAt ?? "",
+            posthogDistinctId: c.posthogDistinctId ?? undefined,
+          };
+        });
+
+        const eventsByConversationId: Record<
+          string,
+          Record<string, unknown>[]
+        > = {};
+        for (const id of ids) {
+          const c = convById.get(id)!;
+          eventsByConversationId[id] = c.events
+            .filter((e) => e.eventType === "assistant_message")
+            .map((e) => ({
+              eventType: e.eventType,
+              data: e.data,
+            })) as Record<string, unknown>[];
+        }
+
+        const r = await fetch("/api/conversations/posthog-bundle", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            dateFrom: format(dateFrom, "yyyy-MM-dd"),
+            dateTo: format(dateTo, "yyyy-MM-dd"),
+            conversations,
+            eventsByConversationId,
+          }),
+        });
         const d = await r.json();
-        if (!cancelled && d.journeys && typeof d.journeys === "object") {
+        if (cancelled) return;
+        if (d.error) {
+          console.error(d.error);
+          return;
+        }
+        if (d.journeys && typeof d.journeys === "object") {
           setJourneys(d.journeys as Record<string, UserJourney | null>);
+        }
+        if (d.enrichments && typeof d.enrichments === "object") {
+          setEnrichments(d.enrichments);
         }
       } catch (err) {
         console.error(err);
       } finally {
-        if (!cancelled) setJourneysBulkLoading(false);
+        if (!cancelled) {
+          setJourneysBulkLoading(false);
+          setEnriching(false);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [journeyBatchIdKey, dateFrom, dateTo]);
+  }, [bundleConversationKey, dateFrom, dateTo, allConversations]);
 
   const toggleExpand = useCallback(
     (conv: ConvWithShop) => {
@@ -570,6 +621,33 @@ export default function ConversationsPage() {
       }
     },
     [expandedId],
+  );
+
+  const handleJourneyRetry = useCallback(
+    async (conversationId: string) => {
+      setJourneyRetryingId(conversationId);
+      try {
+        const params = new URLSearchParams();
+        params.set("conversationId", conversationId);
+        params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
+        params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
+        const r = await fetch(`/api/user-journey?${params}`);
+        const d = await r.json();
+        if (d.error) {
+          console.error(d.error);
+          return;
+        }
+        setJourneys((prev) => ({
+          ...prev,
+          [conversationId]: d as UserJourney,
+        }));
+      } catch (e) {
+        console.error(e);
+      } finally {
+        setJourneyRetryingId(null);
+      }
+    },
+    [dateFrom, dateTo],
   );
 
   const enrichedCount = useMemo(
@@ -815,6 +893,12 @@ export default function ConversationsPage() {
                                       );
                                       const displayText =
                                         parsed.text || JSON.stringify(e.data);
+                                      const showRalphPayload =
+                                        !isUser &&
+                                        (parsed.recommendations.length > 0 ||
+                                          parsed.links.length > 0 ||
+                                          parsed.questions.length > 0 ||
+                                          parsed.action != null);
                                       return (
                                         <div
                                           key={i}
@@ -824,39 +908,149 @@ export default function ConversationsPage() {
                                               : "mr-8 bg-muted"
                                           }`}
                                         >
-                                          <div className="mb-1 text-xs opacity-70">
-                                            {isUser ? "User" : "Ralph"} &middot;{" "}
-                                            {format(
-                                              new Date(e.createdAt),
-                                              "HH:mm:ss",
+                                          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs opacity-70">
+                                            <span>
+                                              {isUser ? "User" : "Ralph"}{" "}
+                                              &middot;{" "}
+                                              {format(
+                                                new Date(e.createdAt),
+                                                "HH:mm:ss",
+                                              )}
+                                            </span>
+                                            {!isUser && parsed.lang && (
+                                              <Badge
+                                                variant="outline"
+                                                className="h-5 px-1.5 text-[10px] font-normal opacity-90"
+                                              >
+                                                {parsed.lang}
+                                              </Badge>
                                             )}
                                           </div>
                                           <div className="whitespace-pre-wrap break-words">
                                             {displayText}
                                           </div>
-                                          {!isUser &&
-                                            parsed.recommendations.length >
-                                              0 && (
-                                              <div className="mt-2 space-y-1 border-t border-border/30 pt-2">
-                                                {parsed.recommendations.map(
-                                                  (rec, ri) => (
-                                                    <div
-                                                      key={ri}
-                                                      className="flex items-center gap-2 text-xs"
-                                                    >
-                                                      <span className="font-medium">
-                                                        {rec.title}
-                                                      </span>
-                                                      {rec.price && (
-                                                        <span className="text-muted-foreground">
-                                                          {rec.price}
+                                          {showRalphPayload && (
+                                            <div className="mt-2 space-y-3 border-t border-border/30 pt-2">
+                                              {parsed.recommendations.length >
+                                                0 && (
+                                                <div className="space-y-1">
+                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                    <Zap className="h-3 w-3" />
+                                                    Recommendations
+                                                  </div>
+                                                  {parsed.recommendations.map(
+                                                    (rec, ri) => (
+                                                      <div
+                                                        key={ri}
+                                                        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
+                                                      >
+                                                        <span className="font-medium">
+                                                          {rec.title}
                                                         </span>
-                                                      )}
-                                                    </div>
-                                                  ),
-                                                )}
-                                              </div>
-                                            )}
+                                                        {rec.price && (
+                                                          <span className="text-muted-foreground">
+                                                            {rec.price}
+                                                          </span>
+                                                        )}
+                                                        {rec.compareAtPrice && (
+                                                          <span className="text-muted-foreground line-through">
+                                                            {rec.compareAtPrice}
+                                                          </span>
+                                                        )}
+                                                      </div>
+                                                    ),
+                                                  )}
+                                                </div>
+                                              )}
+                                              {parsed.links.length > 0 && (
+                                                <div className="space-y-1">
+                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                    <ExternalLink className="h-3 w-3" />
+                                                    Links
+                                                  </div>
+                                                  <ul className="list-none space-y-1 pl-0">
+                                                    {parsed.links.map(
+                                                      (link, li) => (
+                                                        <li key={li}>
+                                                          <a
+                                                            href={link.url}
+                                                            target="_blank"
+                                                            rel="noopener noreferrer"
+                                                            className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                                                          >
+                                                            <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+                                                            {link.label ||
+                                                              link.url}
+                                                          </a>
+                                                        </li>
+                                                      ),
+                                                    )}
+                                                  </ul>
+                                                </div>
+                                              )}
+                                              {parsed.questions.length > 0 && (
+                                                <div className="space-y-2">
+                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                    <ListOrdered className="h-3 w-3" />
+                                                    Questions
+                                                  </div>
+                                                  {parsed.questions.map(
+                                                    (q, qi) => (
+                                                      <div
+                                                        key={qi}
+                                                        className="rounded-md border border-border/40 bg-background/40 px-2 py-1.5"
+                                                      >
+                                                        {q.prompt && (
+                                                          <p className="text-xs font-medium">
+                                                            {q.prompt}
+                                                          </p>
+                                                        )}
+                                                        {q.options.length >
+                                                          0 && (
+                                                          <div className="mt-1.5 flex flex-wrap gap-1">
+                                                            {q.options.map(
+                                                              (opt, oi) => (
+                                                                <Badge
+                                                                  key={oi}
+                                                                  variant="secondary"
+                                                                  className="text-[10px] font-normal"
+                                                                >
+                                                                  {opt}
+                                                                </Badge>
+                                                              ),
+                                                            )}
+                                                          </div>
+                                                        )}
+                                                      </div>
+                                                    ),
+                                                  )}
+                                                </div>
+                                              )}
+                                              {parsed.action && (
+                                                <div className="space-y-1">
+                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                                    <MousePointerClick className="h-3 w-3" />
+                                                    Action
+                                                  </div>
+                                                  <div className="space-y-0.5 rounded-md border border-border/40 bg-background/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed">
+                                                    {Object.entries(
+                                                      parsed.action,
+                                                    ).map(([k, v]) => (
+                                                      <div key={k}>
+                                                        <span className="text-muted-foreground">
+                                                          {k}:
+                                                        </span>{" "}
+                                                        {typeof v ===
+                                                          "object" && v !== null
+                                                          ? JSON.stringify(v)
+                                                          : String(v)}
+                                                      </div>
+                                                    ))}
+                                                  </div>
+                                                </div>
+                                              )}
+                                            </div>
+                                          )}
                                         </div>
                                       );
                                     })}
@@ -875,10 +1069,15 @@ export default function ConversationsPage() {
                               <TabsContent value="journey">
                                 <div className="max-h-[60vh] overflow-y-auto pr-4">
                                   <JourneyTimeline
-                                    journey={journeys[c.conversationId] ?? null}
+                                    journey={journeys[c.conversationId]}
                                     loading={
                                       journeysBulkLoading &&
                                       journeys[c.conversationId] === undefined
+                                    }
+                                    conversationId={c.conversationId}
+                                    onRetry={handleJourneyRetry}
+                                    retryLoading={
+                                      journeyRetryingId === c.conversationId
                                     }
                                   />
                                 </div>

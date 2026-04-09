@@ -41,7 +41,7 @@ Package manager is **npm** (lockfile: `package-lock.json`). Do not introduce Yar
 - **`app/`** — Next.js App Router: pages (`page.tsx`), layouts, and **Route Handlers** under `app/api/*/route.ts`.
 - **`components/`** — UI and feature components.
   - **`components/ui/`** — shadcn-style primitives (**base-nova** in `components.json`, not “new-york”).
-- **`lib/`** — Shared logic: **`dynamo.ts`** (AWS SSM → STS → DynamoDB), **`posthog.ts`** (server HogQL), **`types.ts`** (domain types aligned with backend Pydantic), **`utils.ts`** (`cn()`, etc.).
+- **`lib/`** — Shared logic: **`dynamo.ts`** (AWS SSM → STS → DynamoDB), **`posthog.ts`** (server HogQL), **`conversation-posthog-bundle.ts`** (batched HogQL journey + checkout enrich pipeline for the conversations dashboard), **`types.ts`** (domain types aligned with backend Pydantic), **`utils.ts`** (`cn()`, etc.).
 - **`public/`** — Static assets.
 
 Path alias: **`@/*`** → project root (`tsconfig.json`).

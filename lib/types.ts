@@ -32,6 +32,8 @@ export interface AiConversation {
   sourcePage?: SourcePage;
   /** Set when PostHog rows are loaded for the selected date range; otherwise treat as unknown. */
   launchSource?: ConversationLaunchSource;
+  /** First distinct_id on `just_ai_session_started` for this conversation (batch just_ai_ query). */
+  posthogDistinctId?: string | null;
 }
 
 export interface AiConversationShopGroup {

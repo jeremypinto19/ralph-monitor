@@ -39,7 +39,7 @@ export function ShopFilter({ value, onChange }: ShopFilterProps) {
           All shops
         </SelectItem>
         {shops.map((s) => (
-          <SelectItem key={s.id} value={s.id} className="text-[12px]">
+          <SelectItem key={s.id} value={s.name} className="text-[12px]">
             {s.name}
           </SelectItem>
         ))}

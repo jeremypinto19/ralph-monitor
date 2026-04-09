@@ -61,6 +61,7 @@ interface PhJustAiRow {
   deviceType: string | null;
   mode: string | null;
   tsUnix: number;
+  distinctId: string | null;
 }
 
 function deriveLaunchSource(rows: PhJustAiRow[]): ConversationLaunchSource {
@@ -112,7 +113,8 @@ async function fetchJustAiRowsByConversationIds(
         properties.\`$current_url\` AS current_url,
         properties.\`$device_type\` AS device_type,
         JSONExtractString(properties, 'mode') AS mode,
-        toUnixTimestamp(timestamp) AS ts_unix
+        toUnixTimestamp(timestamp) AS ts_unix,
+        distinct_id
       FROM events
       WHERE startsWith(event, 'just_ai_')
         AND JSONExtractString(properties, 'conversationId') IN (${inList})
@@ -133,6 +135,7 @@ async function fetchJustAiRowsByConversationIds(
         deviceType: (row[3] as string) || null,
         mode: (row[4] as string) || null,
         tsUnix: Number(row[5]) || 0,
+        distinctId: (row[6] as string) || null,
       });
     }
   }
@@ -174,6 +177,9 @@ function applyPostHogRowsToConversations(
         if (r.currentUrl && !sessionUrl) sessionUrl = r.currentUrl;
         if (r.deviceType && !sessionDevice) sessionDevice = r.deviceType;
         if (r.mode && !sessionMode) sessionMode = r.mode;
+        if (r.distinctId && !conv.posthogDistinctId) {
+          conv.posthogDistinctId = r.distinctId;
+        }
       }
     }
 
