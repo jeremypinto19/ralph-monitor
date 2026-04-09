@@ -12,6 +12,9 @@ export interface AiConversationEvent {
 
 export type SourcePage = "homepage" | "product" | "collection" | "other" | null;
 
+/** Derived from PostHog (shortcut click vs first typed message ordering). */
+export type ConversationLaunchSource = "shortcut" | "input" | "unknown";
+
 export interface AiConversation {
   conversationId: string;
   shopId: string;
@@ -27,6 +30,8 @@ export interface AiConversation {
   device?: string | null;
   mode?: string | null;
   sourcePage?: SourcePage;
+  /** Set when PostHog rows are loaded for the selected date range; otherwise treat as unknown. */
+  launchSource?: ConversationLaunchSource;
 }
 
 export interface AiConversationShopGroup {

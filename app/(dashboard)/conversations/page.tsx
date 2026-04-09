@@ -1,6 +1,13 @@
 "use client";
 
-import { useEffect, useState, useMemo, useCallback, Fragment } from "react";
+import {
+  useEffect,
+  useState,
+  useMemo,
+  useCallback,
+  Fragment,
+  useSyncExternalStore,
+} from "react";
 import { format, subDays } from "date-fns";
 import { DateRangePicker } from "@/components/date-range-picker";
 import { ShopFilter } from "@/components/shop-filter";
@@ -23,12 +30,13 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, Keyboard, Loader2, Zap } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   AiConversation,
   AiConversationShopGroup,
   ConversationEnrichment,
+  ConversationLaunchSource,
 } from "@/lib/types";
 import { parseMessage, extractPlainText } from "@/lib/message-utils";
 
@@ -67,6 +75,102 @@ const ATTRIBUTION_LABELS: Record<string, string> = {
   not_influenced: "Not Influenced",
   unknown: "Unknown",
 };
+
+function useClientMounted() {
+  return useSyncExternalStore(
+    () => () => {},
+    () => true,
+    () => false,
+  );
+}
+
+/** Real Select only after hydration so server HTML matches first client render (stable vs HMR / id drift). */
+function LaunchSourceFilter({
+  value,
+  onValueChange,
+}: {
+  value: "all" | ConversationLaunchSource;
+  onValueChange: (v: "all" | ConversationLaunchSource) => void;
+}) {
+  const client = useClientMounted();
+
+  if (!client) {
+    return (
+      <div
+        className="flex h-8 w-[168px] shrink-0 items-center rounded-lg border border-input bg-transparent px-2.5 text-sm text-muted-foreground"
+        aria-hidden
+      >
+        Launch…
+      </div>
+    );
+  }
+
+  return (
+    <Select
+      value={value}
+      onValueChange={(v) =>
+        onValueChange((v ?? "all") as "all" | ConversationLaunchSource)
+      }
+    >
+      <SelectTrigger className="w-[168px]">
+        <SelectValue placeholder="Launch" />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="all">All launches</SelectItem>
+        <SelectItem value="shortcut">Shortcut</SelectItem>
+        <SelectItem value="input">Typed message</SelectItem>
+        <SelectItem value="unknown">Unknown</SelectItem>
+      </SelectContent>
+    </Select>
+  );
+}
+
+function LaunchIndicator({
+  source,
+}: {
+  source: ConversationLaunchSource | undefined;
+}) {
+  if (source === undefined) {
+    return (
+      <span
+        className="text-muted-foreground"
+        title="Launch type requires PostHog data for the selected date range"
+      >
+        —
+      </span>
+    );
+  }
+  if (source === "shortcut") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-medium text-amber-900 dark:bg-amber-950 dark:text-amber-200"
+        title="First interaction was a shortcut click (PostHog: just_ai_shortcut_clicked before first just_ai_message_sent)"
+      >
+        <Zap className="h-3 w-3 shrink-0" aria-hidden />
+        Shortcut
+      </span>
+    );
+  }
+  if (source === "input") {
+    return (
+      <span
+        className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-800 dark:bg-slate-800 dark:text-slate-200"
+        title="Started with a typed message before any shortcut in this session"
+      >
+        <Keyboard className="h-3 w-3 shrink-0" aria-hidden />
+        Typed
+      </span>
+    );
+  }
+  return (
+    <span
+      className="text-muted-foreground text-xs"
+      title="No shortcut or typed send event in PostHog for this conversation"
+    >
+      Unknown
+    </span>
+  );
+}
 
 function AttributionBadge({ attribution }: { attribution: string | null }) {
   if (!attribution) return <span className="text-muted-foreground">—</span>;
@@ -293,6 +397,9 @@ export default function ConversationsPage() {
   const [dateFrom, setDateFrom] = useState(() => subDays(new Date(), 7));
   const [dateTo, setDateTo] = useState(() => new Date());
   const [device, setDevice] = useState("all");
+  const [launchSource, setLaunchSource] = useState<
+    "all" | ConversationLaunchSource
+  >("all");
   const [search, setSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -318,6 +425,7 @@ export default function ConversationsPage() {
       params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
       if (shop !== "all") params.set("shopId", shop);
       if (device !== "all") params.set("device", device);
+      if (launchSource !== "all") params.set("launchSource", launchSource);
 
       try {
         const r = await fetch(`/api/conversations?${params}`);
@@ -336,7 +444,7 @@ export default function ConversationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [shop, dateFrom, dateTo, device]);
+  }, [shop, dateFrom, dateTo, device, launchSource]);
 
   // Trigger enrichment once conversations load
   useEffect(() => {
@@ -498,6 +606,10 @@ export default function ConversationsPage() {
             <SelectItem value="desktop">Desktop</SelectItem>
           </SelectContent>
         </Select>
+        <LaunchSourceFilter
+          value={launchSource}
+          onValueChange={setLaunchSource}
+        />
         <Input
           placeholder="Search messages..."
           className="w-[200px]"
@@ -553,6 +665,7 @@ export default function ConversationsPage() {
               <TableHead>Messages</TableHead>
               <TableHead>Device</TableHead>
               <TableHead>Source</TableHead>
+              <TableHead>Launch</TableHead>
               <TableHead>Checkout</TableHead>
               <TableHead>Attribution</TableHead>
               <TableHead>End Reason</TableHead>
@@ -583,6 +696,9 @@ export default function ConversationsPage() {
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-5 w-20 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-24 rounded-full" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-5 w-24 rounded-full" />
@@ -637,6 +753,9 @@ export default function ConversationsPage() {
                         )}
                       </TableCell>
                       <TableCell>
+                        <LaunchIndicator source={c.launchSource} />
+                      </TableCell>
+                      <TableCell>
                         <CheckoutBadge enrichment={enrichment} />
                       </TableCell>
                       <TableCell>
@@ -653,7 +772,7 @@ export default function ConversationsPage() {
                     </TableRow>
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={10} className="p-0">
+                        <TableCell colSpan={11} className="p-0">
                           <div className="border-t bg-muted/20 px-6 py-4">
                             <div className="mb-3 flex items-center gap-2">
                               <span className="text-sm font-semibold">
@@ -781,7 +900,7 @@ export default function ConversationsPage() {
             {allConversations.length === 0 && !loading && (
               <TableRow>
                 <TableCell
-                  colSpan={10}
+                  colSpan={11}
                   className="text-center text-muted-foreground"
                 >
                   No conversations match your filters.

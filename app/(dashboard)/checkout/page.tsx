@@ -502,7 +502,6 @@ export default function CheckoutPage() {
 
                   {/* Conversation */}
                   <ConversationSection
-                    distinctId={g.distinctId}
                     firstRalphTs={g.firstRalphTs}
                     shopId={g.shopId}
                     allConvos={userConvos}

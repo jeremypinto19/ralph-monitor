@@ -5,6 +5,7 @@ import type {
   AiConversationEvent,
   AiConversation,
   AiConversationShopGroup,
+  ConversationLaunchSource,
   SourcePage,
 } from "@/lib/types";
 
@@ -59,6 +60,30 @@ interface PhJustAiRow {
   currentUrl: string;
   deviceType: string | null;
   mode: string | null;
+  tsUnix: number;
+}
+
+function deriveLaunchSource(rows: PhJustAiRow[]): ConversationLaunchSource {
+  let minShortcut = Number.POSITIVE_INFINITY;
+  let minMessage = Number.POSITIVE_INFINITY;
+  for (const r of rows) {
+    if (r.event === "just_ai_shortcut_clicked") {
+      minShortcut = Math.min(minShortcut, r.tsUnix);
+    }
+    if (r.event === "just_ai_message_sent") {
+      minMessage = Math.min(minMessage, r.tsUnix);
+    }
+  }
+  if (!Number.isFinite(minShortcut) && !Number.isFinite(minMessage)) {
+    return "unknown";
+  }
+  if (Number.isFinite(minShortcut) && !Number.isFinite(minMessage)) {
+    return "shortcut";
+  }
+  if (!Number.isFinite(minShortcut) && Number.isFinite(minMessage)) {
+    return "input";
+  }
+  return minShortcut <= minMessage ? "shortcut" : "input";
 }
 
 async function fetchJustAiRowsByConversationIds(
@@ -86,7 +111,8 @@ async function fetchJustAiRowsByConversationIds(
         event,
         properties.\`$current_url\` AS current_url,
         properties.\`$device_type\` AS device_type,
-        JSONExtractString(properties, 'mode') AS mode
+        JSONExtractString(properties, 'mode') AS mode,
+        toUnixTimestamp(timestamp) AS ts_unix
       FROM events
       WHERE startsWith(event, 'just_ai_')
         AND JSONExtractString(properties, 'conversationId') IN (${inList})
@@ -106,6 +132,7 @@ async function fetchJustAiRowsByConversationIds(
         currentUrl: (row[2] as string) || "",
         deviceType: (row[3] as string) || null,
         mode: (row[4] as string) || null,
+        tsUnix: Number(row[5]) || 0,
       });
     }
   }
@@ -121,6 +148,10 @@ function applyPostHogRowsToConversations(
   for (const r of rows) {
     if (!byCid.has(r.conversationId)) byCid.set(r.conversationId, []);
     byCid.get(r.conversationId)!.push(r);
+  }
+
+  for (const conv of conversations) {
+    conv.launchSource = "unknown";
   }
 
   for (const conv of conversations) {
@@ -167,6 +198,8 @@ function applyPostHogRowsToConversations(
         }
       }
     }
+
+    conv.launchSource = deriveLaunchSource(list);
   }
 }
 
@@ -230,6 +263,7 @@ export async function GET(request: Request) {
     const dateTo = searchParams.get("dateTo");
     const deviceFilter = searchParams.get("device");
     const modeFilter = searchParams.get("mode");
+    const launchSourceFilter = searchParams.get("launchSource");
 
     const items = await scanTable("AiAgentConversationsProd");
 
@@ -317,6 +351,13 @@ export async function GET(request: Request) {
           err,
         );
       }
+    }
+
+    if (launchSourceFilter && launchSourceFilter !== "all") {
+      conversations = conversations.filter((c) => {
+        const resolved = c.launchSource ?? "unknown";
+        return resolved === launchSourceFilter;
+      });
     }
 
     const groups: AiConversationShopGroup[] = [];
