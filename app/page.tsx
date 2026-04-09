@@ -1,65 +1,152 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import { useEffect, useState } from "react";
+import { format, subDays } from "date-fns";
+import { DateRangePicker } from "@/components/date-range-picker";
+import { ShopFilter } from "@/components/shop-filter";
+import { KpiCard } from "@/components/kpi-card";
+import {
+  ChartCard,
+  TimeSeriesChart,
+  HorizontalBarChart,
+  DonutChart,
+} from "@/components/charts";
+import {
+  MessageSquare,
+  Users,
+  ShoppingCart,
+  TrendingUp,
+  Store,
+} from "lucide-react";
+import type { InsightsData } from "@/lib/types";
+
+export default function OverviewPage() {
+  const [data, setData] = useState<InsightsData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [shop, setShop] = useState("all");
+  const [dateFrom, setDateFrom] = useState(() => subDays(new Date(), 30));
+  const [dateTo, setDateTo] = useState(() => new Date());
+
+  useEffect(() => {
+    setLoading(true);
+    const params = new URLSearchParams();
+    params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
+    params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
+    if (shop !== "all") params.set("shopId", shop);
+
+    fetch(`/api/insights?${params}`)
+      .then((r) => r.json())
+      .then((json) => {
+        if (json.error) {
+          console.error("[Overview]", json.error);
+          return;
+        }
+        setData(json);
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false));
+  }, [dateFrom, dateTo, shop]);
+
+  if (loading || !data) {
+    return (
+      <div className="flex h-full items-center justify-center">
+        <p className="text-[13px] text-muted-foreground animate-pulse">
+          Loading overview...
+        </p>
+      </div>
+    );
+  }
+
+  const deviceData = Object.entries(data.deviceBreakdown ?? {}).map(
+    ([name, value]) => ({ name, value })
+  );
+  const modeData = Object.entries(data.modeBreakdown ?? {}).map(
+    ([name, value]) => ({ name, value })
+  );
+  const topShopsData = (data.topShops ?? []).map((s) => ({
+    name: s.shopName,
+    value: s.count,
+  }));
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="mx-auto max-w-5xl px-8 py-10">
+      <div className="mb-6">
+        <h1 className="text-xl font-semibold tracking-tight text-foreground">
+          Overview
+        </h1>
+        <p className="mt-0.5 text-[13px] text-muted-foreground">
+          Aggregated statistics and trends
+        </p>
+      </div>
+
+      <div className="mb-8 flex flex-wrap items-center gap-2">
+        <ShopFilter value={shop} onChange={setShop} />
+        <DateRangePicker
+          from={dateFrom}
+          to={dateTo}
+          onChange={(f, t) => {
+            setDateFrom(f);
+            setDateTo(t);
+          }}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
-        </div>
-      </main>
+      </div>
+
+      <div className="mb-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-5">
+        <KpiCard
+          title="Active Shops"
+          value={data.activeShops ?? 0}
+          icon={Store}
+        />
+        <KpiCard
+          title="Conversations"
+          value={data.totalConversations}
+          icon={MessageSquare}
+        />
+        <KpiCard
+          title="With Messages"
+          value={data.conversationsWithMessages ?? 0}
+          subtitle={`out of ${data.totalConversations}`}
+          icon={Users}
+        />
+        <KpiCard
+          title="Avg Msg / Convo"
+          value={data.avgMessagesPerConversation}
+          subtitle={`${data.totalMessages} total messages`}
+          icon={TrendingUp}
+        />
+        <KpiCard
+          title="Checkout Completed"
+          value={(data.checkoutCompletedClassic ?? 0) + (data.checkoutCompletedJust ?? 0)}
+          subtitle={`${data.checkoutCompletedClassic ?? 0} Classic · ${data.checkoutCompletedJust ?? 0} JUST`}
+          icon={ShoppingCart}
+        />
+      </div>
+
+      <div className="grid gap-6 lg:grid-cols-2">
+        <ChartCard title="Conversation volume over time">
+          <TimeSeriesChart data={data.volumeOverTime} />
+        </ChartCard>
+
+        <ChartCard title="Avg messages per conversation over time">
+          <TimeSeriesChart data={data.avgMessagesOverTime ?? []} color="#505048" />
+        </ChartCard>
+
+        <ChartCard title="Messages per conversation distribution">
+          <HorizontalBarChart data={data.messageDistribution ?? []} />
+        </ChartCard>
+
+        <ChartCard title="Top shops">
+          <HorizontalBarChart data={topShopsData} />
+        </ChartCard>
+
+        <ChartCard title="Device breakdown">
+          <DonutChart data={deviceData} />
+        </ChartCard>
+
+        <ChartCard title="Mode breakdown">
+          <DonutChart data={modeData} />
+        </ChartCard>
+      </div>
     </div>
   );
 }
