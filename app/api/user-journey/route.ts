@@ -229,6 +229,128 @@ function stepsFromPostHogRows(results: unknown[][]): TimelineStep[] {
   return steps;
 }
 
+const JOURNEY_MAX_EVENTS_PER_CONVERSATION = 500;
+const JOURNEY_BATCH_MAX_IDS = 120;
+const JOURNEY_BATCH_QUERY_ROW_CAP = 50_000;
+
+function parseConversationIdsParam(
+  searchParams: URLSearchParams,
+): string[] | null {
+  if (!searchParams.has("conversationIds")) return null;
+  const parts = searchParams.getAll("conversationIds");
+  const raw = parts
+    .flatMap((p) => p.split(","))
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return [...new Set(raw)];
+}
+
+function stepFromBatchRow(row: unknown[]): TimelineStep {
+  const event = row[1] as string;
+  return {
+    time: row[2] as string,
+    event,
+    details: extractDetails(event, row[3] as string),
+  };
+}
+
+function buildJourneyJson(
+  steps: TimelineStep[],
+  resolvedDistinctId?: string,
+): {
+  summary: string;
+  timeline: {
+    time: string;
+    event: string;
+    rawEvent: string;
+    details: string;
+  }[];
+  totalEvents: number;
+  resolved: boolean;
+  resolvedDistinctId?: string;
+} {
+  let durationSec = 0;
+  if (steps.length >= 2) {
+    const first = new Date(steps[0].time).getTime();
+    const last = new Date(steps[steps.length - 1].time).getTime();
+    durationSec = (last - first) / 1000;
+  }
+
+  const summary =
+    steps.length > 0 ? generateSummary(steps, durationSec) : "No events found.";
+
+  const timeline = steps.map((s) => ({
+    time: s.time,
+    event:
+      EVENT_LABELS[s.event] ??
+      s.event.replace(/^just_ai_/, "").replace(/_/g, " "),
+    rawEvent: s.event,
+    details: s.details,
+  }));
+
+  return {
+    summary,
+    timeline,
+    totalEvents: steps.length,
+    resolved: true,
+    ...(resolvedDistinctId ? { resolvedDistinctId } : {}),
+  };
+}
+
+async function handleBatchJourneys(
+  conversationIds: string[],
+  dateFrom: string,
+  dateTo: string,
+): Promise<Record<string, ReturnType<typeof buildJourneyJson>>> {
+  const journeys: Record<string, ReturnType<typeof buildJourneyJson>> = {};
+  if (conversationIds.length === 0) return journeys;
+
+  const capped = conversationIds.slice(0, JOURNEY_BATCH_MAX_IDS);
+  const dateFromQ = hogqlQuote(dateFrom);
+  const dateToQ = hogqlQuote(dateTo);
+  const inList = capped.map(hogqlQuote).join(", ");
+
+  const eventsResult = await queryPostHog(`
+    SELECT
+      JSONExtractString(properties, 'conversationId') AS conversation_id,
+      event,
+      timestamp,
+      JSONExtractString(properties, 'data') AS data_json,
+      distinct_id
+    FROM events
+    WHERE JSONExtractString(properties, 'conversationId') IN (${inList})
+      AND ${JOURNEY_EVENTS_FILTER}
+      AND timestamp >= ${dateFromQ}
+      AND timestamp <= ${dateToQ}
+    ORDER BY conversation_id, timestamp ASC
+    LIMIT ${JOURNEY_BATCH_QUERY_ROW_CAP}
+  `);
+
+  const byCid = new Map<string, TimelineStep[]>();
+  const distinctByCid = new Map<string, string>();
+  for (const row of eventsResult.results) {
+    const cid = row[0] as string;
+    if (!cid) continue;
+    const did = row[4] as string;
+    if (did && !distinctByCid.has(cid)) distinctByCid.set(cid, did);
+
+    if (!byCid.has(cid)) byCid.set(cid, []);
+    const list = byCid.get(cid)!;
+    if (list.length >= JOURNEY_MAX_EVENTS_PER_CONVERSATION) continue;
+    list.push(stepFromBatchRow(row));
+  }
+
+  for (const cid of capped) {
+    const steps = byCid.get(cid) ?? [];
+    journeys[cid] = buildJourneyJson(
+      steps,
+      distinctByCid.get(cid) ?? undefined,
+    );
+  }
+
+  return journeys;
+}
+
 async function fetchDistinctIdForConversation(
   conversationId: string,
 ): Promise<string | null> {
@@ -248,15 +370,21 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
 
+    const dateFrom = searchParams.get("dateFrom") ?? "2024-01-01";
+    const dateTo = searchParams.get("dateTo") ?? "2099-12-31";
+    const dateFromQ = hogqlQuote(dateFrom);
+    const dateToQ = hogqlQuote(dateTo);
+
+    const batchIds = parseConversationIdsParam(searchParams);
+    if (batchIds !== null) {
+      const journeys = await handleBatchJourneys(batchIds, dateFrom, dateTo);
+      return NextResponse.json({ journeys });
+    }
+
     const conversationId = searchParams.get("conversationId") ?? "";
     const distinctIdParam = searchParams.get("distinctId");
     const shopId = searchParams.get("shopId") ?? "";
     const startedAt = searchParams.get("startedAt") ?? "";
-    const dateFrom = searchParams.get("dateFrom") ?? "2024-01-01";
-    const dateTo = searchParams.get("dateTo") ?? "2099-12-31";
-
-    const dateFromQ = hogqlQuote(dateFrom);
-    const dateToQ = hogqlQuote(dateTo);
 
     let steps: TimelineStep[] = [];
     let resolvedDistinctId: string | undefined;
@@ -273,7 +401,7 @@ export async function GET(request: Request) {
         AND timestamp >= ${dateFromQ}
         AND timestamp <= ${dateToQ}
       ORDER BY timestamp ASC
-      LIMIT 500
+      LIMIT ${JOURNEY_MAX_EVENTS_PER_CONVERSATION}
     `);
       steps = stepsFromPostHogRows(byConv.results);
       resolvedDistinctId =
@@ -307,40 +435,13 @@ export async function GET(request: Request) {
         AND timestamp >= ${dateFromQ}
         AND timestamp <= ${dateToQ}
       ORDER BY timestamp ASC
-      LIMIT 500
+      LIMIT ${JOURNEY_MAX_EVENTS_PER_CONVERSATION}
     `);
 
       steps = stepsFromPostHogRows(result.results);
     }
 
-    let durationSec = 0;
-    if (steps.length >= 2) {
-      const first = new Date(steps[0].time).getTime();
-      const last = new Date(steps[steps.length - 1].time).getTime();
-      durationSec = (last - first) / 1000;
-    }
-
-    const summary =
-      steps.length > 0
-        ? generateSummary(steps, durationSec)
-        : "No events found.";
-
-    const timeline = steps.map((s) => ({
-      time: s.time,
-      event:
-        EVENT_LABELS[s.event] ??
-        s.event.replace(/^just_ai_/, "").replace(/_/g, " "),
-      rawEvent: s.event,
-      details: s.details,
-    }));
-
-    return NextResponse.json({
-      summary,
-      timeline,
-      totalEvents: steps.length,
-      resolved: true,
-      resolvedDistinctId,
-    });
+    return NextResponse.json(buildJourneyJson(steps, resolvedDistinctId));
   } catch (err) {
     console.error("[API /user-journey]", err);
     const msg = err instanceof Error ? err.message : String(err);

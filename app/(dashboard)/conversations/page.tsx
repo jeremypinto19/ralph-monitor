@@ -23,7 +23,8 @@ import {
 } from "@/components/ui/table";
 import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ChevronDown } from "lucide-react";
+import { ChevronDown, Loader2 } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 import type {
   AiConversation,
   AiConversationShopGroup,
@@ -328,13 +329,11 @@ export default function ConversationsPage() {
   >({});
   const [enriching, setEnriching] = useState(false);
 
-  // Journey state keyed by conversationId (lazy-loaded)
+  // Journeys prefetched in one PostHog batch (see journeyBatchIdKey effect)
   const [journeys, setJourneys] = useState<Record<string, UserJourney | null>>(
     {},
   );
-  const [journeyLoading, setJourneyLoading] = useState<Record<string, boolean>>(
-    {},
-  );
+  const [journeysBulkLoading, setJourneysBulkLoading] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -352,6 +351,7 @@ export default function ConversationsPage() {
         if (!cancelled) {
           setGroups(d.groups ?? []);
           setEnrichments({});
+          setJourneys({});
         }
       } catch (err) {
         console.error(err);
@@ -411,45 +411,6 @@ export default function ConversationsPage() {
     };
   }, [groups]);
 
-  const loadJourney = useCallback(
-    (conv: ConvWithShop) => {
-      if (journeys[conv.conversationId] !== undefined) return;
-      setJourneyLoading((prev) => ({ ...prev, [conv.conversationId]: true }));
-      const params = new URLSearchParams();
-      params.set("conversationId", conv.conversationId);
-      params.set("shopId", conv.shopId);
-      if (conv.startedAt) params.set("startedAt", conv.startedAt);
-      params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
-      params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
-
-      fetch(`/api/user-journey?${params}`)
-        .then((r) => r.json())
-        .then((d) =>
-          setJourneys((prev) => ({ ...prev, [conv.conversationId]: d })),
-        )
-        .catch(console.error)
-        .finally(() =>
-          setJourneyLoading((prev) => ({
-            ...prev,
-            [conv.conversationId]: false,
-          })),
-        );
-    },
-    [dateFrom, dateTo, journeys],
-  );
-
-  const toggleExpand = useCallback(
-    (conv: ConvWithShop) => {
-      if (expandedId === conv.conversationId) {
-        setExpandedId(null);
-      } else {
-        setExpandedId(conv.conversationId);
-        loadJourney(conv);
-      }
-    },
-    [expandedId, loadJourney],
-  );
-
   const allConversations = useMemo(() => {
     let flat: ConvWithShop[] = groups.flatMap((g) =>
       g.conversations.map((c) => ({
@@ -477,6 +438,57 @@ export default function ConversationsPage() {
         }),
     );
   }, [groups, search, hideEmpty]);
+
+  const journeyBatchIdKey = useMemo(() => {
+    return allConversations
+      .slice(0, 100)
+      .map((c) => c.conversationId)
+      .sort()
+      .join(",");
+  }, [allConversations]);
+
+  useEffect(() => {
+    if (journeyBatchIdKey.length === 0) {
+      setJourneys({});
+      setJourneysBulkLoading(false);
+      return;
+    }
+
+    const ids = journeyBatchIdKey.split(",").filter(Boolean);
+    let cancelled = false;
+    void (async () => {
+      setJourneysBulkLoading(true);
+      try {
+        const params = new URLSearchParams();
+        params.set("conversationIds", ids.join(","));
+        params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
+        params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
+        const r = await fetch(`/api/user-journey?${params}`);
+        const d = await r.json();
+        if (!cancelled && d.journeys && typeof d.journeys === "object") {
+          setJourneys(d.journeys as Record<string, UserJourney | null>);
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!cancelled) setJourneysBulkLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [journeyBatchIdKey, dateFrom, dateTo]);
+
+  const toggleExpand = useCallback(
+    (conv: ConvWithShop) => {
+      if (expandedId === conv.conversationId) {
+        setExpandedId(null);
+      } else {
+        setExpandedId(conv.conversationId);
+      }
+    },
+    [expandedId],
+  );
 
   const enrichedCount = useMemo(
     () => Object.values(enrichments).filter((e) => e.hasCheckout).length,
@@ -534,8 +546,18 @@ export default function ConversationsPage() {
       </div>
 
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
-        <span>
-          {loading ? "Loading..." : `${allConversations.length} conversations`}
+        <span className="inline-flex items-center gap-2">
+          {loading ? (
+            <>
+              <Loader2
+                className="h-4 w-4 shrink-0 animate-spin text-muted-foreground"
+                aria-hidden
+              />
+              <span>Loading conversations…</span>
+            </>
+          ) : (
+            `${allConversations.length} conversations`
+          )}
         </span>
         {enriching && (
           <span className="text-xs">· Enriching checkout data...</span>
@@ -564,181 +586,224 @@ export default function ConversationsPage() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {allConversations.slice(0, 100).map((c) => {
-              const enrichment = enrichments[c.conversationId];
-              const isExpanded = expandedId === c.conversationId;
-              return (
-                <Fragment key={c.conversationId}>
-                  <TableRow
-                    className="cursor-pointer"
-                    onClick={() => toggleExpand(c)}
-                    data-state={isExpanded ? "selected" : undefined}
-                  >
-                    <TableCell className="w-8 px-2">
-                      <ChevronDown
-                        className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? "rotate-180" : ""}`}
-                      />
-                    </TableCell>
-                    <TableCell className="font-medium">{c.shopName}</TableCell>
-                    <TableCell className="text-sm">
-                      {c.startedAt
-                        ? format(new Date(c.startedAt), "MMM d, HH:mm")
-                        : "—"}
-                    </TableCell>
-                    <TableCell>{c.messageCount}</TableCell>
-                    <TableCell>
-                      {c.device ? (
-                        <Badge variant="outline">{c.device}</Badge>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {c.mode ? (
-                        <Badge variant="secondary" className="capitalize">
-                          {c.mode}
-                        </Badge>
-                      ) : (
-                        "—"
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      <CheckoutBadge enrichment={enrichment} />
-                    </TableCell>
-                    <TableCell>
-                      <AttributionBadge
-                        attribution={enrichment?.attribution ?? null}
-                      />
-                    </TableCell>
-                    <TableCell className="text-xs">
-                      {c.endReason ?? "—"}
-                    </TableCell>
-                    <TableCell className="text-right font-mono text-xs text-muted-foreground">
-                      {c.conversationId.slice(0, 8)}
-                    </TableCell>
-                  </TableRow>
-                  {isExpanded && (
-                    <TableRow>
-                      <TableCell colSpan={10} className="p-0">
-                        <div className="border-t bg-muted/20 px-6 py-4">
-                          <div className="mb-3 flex items-center gap-2">
-                            <span className="text-sm font-semibold">
-                              Conversation
-                            </span>
-                            <span className="font-mono text-xs text-muted-foreground">
-                              {c.conversationId}
-                            </span>
-                            {enrichment?.hasCheckout && (
-                              <CheckoutBadge enrichment={enrichment} />
-                            )}
-                          </div>
-                          <Tabs defaultValue="chat" className="w-full">
-                            <TabsList className="grid w-full max-w-md grid-cols-3">
-                              <TabsTrigger value="chat">Chat</TabsTrigger>
-                              <TabsTrigger value="journey">
-                                User Journey
-                              </TabsTrigger>
-                              <TabsTrigger value="attribution">
-                                Attribution
-                              </TabsTrigger>
-                            </TabsList>
+            {loading &&
+              Array.from({ length: 8 }).map((_, i) => (
+                <TableRow key={`sk-${i}`} className="pointer-events-none">
+                  <TableCell className="w-8 px-2">
+                    <Skeleton className="h-4 w-4 rounded" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-24" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-20" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-8" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-14 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-16 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-20 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-5 w-24 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-28" />
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <Skeleton className="ml-auto h-4 w-16" />
+                  </TableCell>
+                </TableRow>
+              ))}
+            {!loading &&
+              allConversations.slice(0, 100).map((c) => {
+                const enrichment = enrichments[c.conversationId];
+                const isExpanded = expandedId === c.conversationId;
+                return (
+                  <Fragment key={c.conversationId}>
+                    <TableRow
+                      className="cursor-pointer"
+                      onClick={() => toggleExpand(c)}
+                      data-state={isExpanded ? "selected" : undefined}
+                    >
+                      <TableCell className="w-8 px-2">
+                        <ChevronDown
+                          className={`h-4 w-4 text-muted-foreground transition-transform ${isExpanded ? "rotate-180" : ""}`}
+                        />
+                      </TableCell>
+                      <TableCell className="font-medium">
+                        {c.shopName}
+                      </TableCell>
+                      <TableCell className="text-sm">
+                        {c.startedAt
+                          ? format(new Date(c.startedAt), "MMM d, HH:mm")
+                          : "—"}
+                      </TableCell>
+                      <TableCell>{c.messageCount}</TableCell>
+                      <TableCell>
+                        {c.device ? (
+                          <Badge variant="outline">{c.device}</Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {c.mode ? (
+                          <Badge variant="secondary" className="capitalize">
+                            {c.mode}
+                          </Badge>
+                        ) : (
+                          "—"
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        <CheckoutBadge enrichment={enrichment} />
+                      </TableCell>
+                      <TableCell>
+                        <AttributionBadge
+                          attribution={enrichment?.attribution ?? null}
+                        />
+                      </TableCell>
+                      <TableCell className="text-xs">
+                        {c.endReason ?? "—"}
+                      </TableCell>
+                      <TableCell className="text-right font-mono text-xs text-muted-foreground">
+                        {c.conversationId.slice(0, 8)}
+                      </TableCell>
+                    </TableRow>
+                    {isExpanded && (
+                      <TableRow>
+                        <TableCell colSpan={10} className="p-0">
+                          <div className="border-t bg-muted/20 px-6 py-4">
+                            <div className="mb-3 flex items-center gap-2">
+                              <span className="text-sm font-semibold">
+                                Conversation
+                              </span>
+                              <span className="font-mono text-xs text-muted-foreground">
+                                {c.conversationId}
+                              </span>
+                              {enrichment?.hasCheckout && (
+                                <CheckoutBadge enrichment={enrichment} />
+                              )}
+                            </div>
+                            <Tabs defaultValue="chat" className="w-full">
+                              <TabsList className="grid w-full max-w-md grid-cols-3">
+                                <TabsTrigger value="chat">Chat</TabsTrigger>
+                                <TabsTrigger value="journey">
+                                  User Journey
+                                </TabsTrigger>
+                                <TabsTrigger value="attribution">
+                                  Attribution
+                                </TabsTrigger>
+                              </TabsList>
 
-                            <TabsContent value="chat">
-                              <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-4">
-                                {c.events
-                                  .filter(
+                              <TabsContent value="chat">
+                                <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-4">
+                                  {c.events
+                                    .filter(
+                                      (e) =>
+                                        e.eventType === "user_message" ||
+                                        e.eventType === "assistant_message",
+                                    )
+                                    .map((e, i) => {
+                                      const isUser =
+                                        e.eventType === "user_message";
+                                      const parsed = parseMessage(
+                                        (e.data ?? {}) as Record<
+                                          string,
+                                          unknown
+                                        >,
+                                      );
+                                      const displayText =
+                                        parsed.text || JSON.stringify(e.data);
+                                      return (
+                                        <div
+                                          key={i}
+                                          className={`rounded-lg p-3 text-sm ${
+                                            isUser
+                                              ? "ml-8 bg-primary text-primary-foreground"
+                                              : "mr-8 bg-muted"
+                                          }`}
+                                        >
+                                          <div className="mb-1 text-xs opacity-70">
+                                            {isUser ? "User" : "Ralph"} &middot;{" "}
+                                            {format(
+                                              new Date(e.createdAt),
+                                              "HH:mm:ss",
+                                            )}
+                                          </div>
+                                          <div className="whitespace-pre-wrap break-words">
+                                            {displayText}
+                                          </div>
+                                          {!isUser &&
+                                            parsed.recommendations.length >
+                                              0 && (
+                                              <div className="mt-2 space-y-1 border-t border-border/30 pt-2">
+                                                {parsed.recommendations.map(
+                                                  (rec, ri) => (
+                                                    <div
+                                                      key={ri}
+                                                      className="flex items-center gap-2 text-xs"
+                                                    >
+                                                      <span className="font-medium">
+                                                        {rec.title}
+                                                      </span>
+                                                      {rec.price && (
+                                                        <span className="text-muted-foreground">
+                                                          {rec.price}
+                                                        </span>
+                                                      )}
+                                                    </div>
+                                                  ),
+                                                )}
+                                              </div>
+                                            )}
+                                        </div>
+                                      );
+                                    })}
+                                  {c.events.filter(
                                     (e) =>
                                       e.eventType === "user_message" ||
                                       e.eventType === "assistant_message",
-                                  )
-                                  .map((e, i) => {
-                                    const isUser =
-                                      e.eventType === "user_message";
-                                    const parsed = parseMessage(
-                                      (e.data ?? {}) as Record<string, unknown>,
-                                    );
-                                    const displayText =
-                                      parsed.text || JSON.stringify(e.data);
-                                    return (
-                                      <div
-                                        key={i}
-                                        className={`rounded-lg p-3 text-sm ${
-                                          isUser
-                                            ? "ml-8 bg-primary text-primary-foreground"
-                                            : "mr-8 bg-muted"
-                                        }`}
-                                      >
-                                        <div className="mb-1 text-xs opacity-70">
-                                          {isUser ? "User" : "Ralph"} &middot;{" "}
-                                          {format(
-                                            new Date(e.createdAt),
-                                            "HH:mm:ss",
-                                          )}
-                                        </div>
-                                        <div className="whitespace-pre-wrap break-words">
-                                          {displayText}
-                                        </div>
-                                        {!isUser &&
-                                          parsed.recommendations.length > 0 && (
-                                            <div className="mt-2 space-y-1 border-t border-border/30 pt-2">
-                                              {parsed.recommendations.map(
-                                                (rec, ri) => (
-                                                  <div
-                                                    key={ri}
-                                                    className="flex items-center gap-2 text-xs"
-                                                  >
-                                                    <span className="font-medium">
-                                                      {rec.title}
-                                                    </span>
-                                                    {rec.price && (
-                                                      <span className="text-muted-foreground">
-                                                        {rec.price}
-                                                      </span>
-                                                    )}
-                                                  </div>
-                                                ),
-                                              )}
-                                            </div>
-                                          )}
-                                      </div>
-                                    );
-                                  })}
-                                {c.events.filter(
-                                  (e) =>
-                                    e.eventType === "user_message" ||
-                                    e.eventType === "assistant_message",
-                                ).length === 0 && (
-                                  <div className="py-8 text-center text-sm text-muted-foreground">
-                                    No messages in this conversation.
-                                  </div>
-                                )}
-                              </div>
-                            </TabsContent>
+                                  ).length === 0 && (
+                                    <div className="py-8 text-center text-sm text-muted-foreground">
+                                      No messages in this conversation.
+                                    </div>
+                                  )}
+                                </div>
+                              </TabsContent>
 
-                            <TabsContent value="journey">
-                              <div className="max-h-[60vh] overflow-y-auto pr-4">
-                                <JourneyTimeline
-                                  journey={journeys[c.conversationId] ?? null}
-                                  loading={
-                                    journeyLoading[c.conversationId] ?? false
-                                  }
-                                />
-                              </div>
-                            </TabsContent>
+                              <TabsContent value="journey">
+                                <div className="max-h-[60vh] overflow-y-auto pr-4">
+                                  <JourneyTimeline
+                                    journey={journeys[c.conversationId] ?? null}
+                                    loading={
+                                      journeysBulkLoading &&
+                                      journeys[c.conversationId] === undefined
+                                    }
+                                  />
+                                </div>
+                              </TabsContent>
 
-                            <TabsContent value="attribution">
-                              <div className="max-h-[60vh] overflow-y-auto pr-4">
-                                <AttributionDetail enrichment={enrichment} />
-                              </div>
-                            </TabsContent>
-                          </Tabs>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )}
-                </Fragment>
-              );
-            })}
+                              <TabsContent value="attribution">
+                                <div className="max-h-[60vh] overflow-y-auto pr-4">
+                                  <AttributionDetail enrichment={enrichment} />
+                                </div>
+                              </TabsContent>
+                            </Tabs>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    )}
+                  </Fragment>
+                );
+              })}
             {allConversations.length === 0 && !loading && (
               <TableRow>
                 <TableCell
