@@ -23,7 +23,7 @@ export default function InsightsPage() {
   const [expandedDim, setExpandedDim] = useState<string | null>(null);
 
   useEffect(() => {
-    setLoading(true);
+    queueMicrotask(() => setLoading(true));
     const params = new URLSearchParams();
     params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
     params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
@@ -122,7 +122,7 @@ export default function InsightsPage() {
             <ChartCard title="Device Split">
               <DonutChart
                 data={Object.entries(data.deviceBreakdown ?? {}).map(
-                  ([name, value]) => ({ name, value })
+                  ([name, value]) => ({ name, value }),
                 )}
               />
             </ChartCard>
@@ -148,9 +148,7 @@ export default function InsightsPage() {
               return (
                 <div key={dim.name}>
                   <button
-                    onClick={() =>
-                      setExpandedDim(isExpanded ? null : dim.name)
-                    }
+                    onClick={() => setExpandedDim(isExpanded ? null : dim.name)}
                     className="flex w-full items-center justify-between px-4 py-3 text-left transition-colors hover:bg-accent/30"
                   >
                     <div className="flex items-center gap-3">

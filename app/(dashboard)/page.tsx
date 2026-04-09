@@ -28,7 +28,7 @@ export default function OverviewPage() {
   const [dateTo, setDateTo] = useState(() => new Date());
 
   useEffect(() => {
-    setLoading(true);
+    queueMicrotask(() => setLoading(true));
     const params = new URLSearchParams();
     params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
     params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
@@ -58,10 +58,10 @@ export default function OverviewPage() {
   }
 
   const deviceData = Object.entries(data.deviceBreakdown ?? {}).map(
-    ([name, value]) => ({ name, value })
+    ([name, value]) => ({ name, value }),
   );
   const modeData = Object.entries(data.modeBreakdown ?? {}).map(
-    ([name, value]) => ({ name, value })
+    ([name, value]) => ({ name, value }),
   );
   const topShopsData = (data.topShops ?? []).map((s) => ({
     name: s.shopName,
@@ -116,7 +116,10 @@ export default function OverviewPage() {
         />
         <KpiCard
           title="Checkout Completed"
-          value={(data.checkoutCompletedClassic ?? 0) + (data.checkoutCompletedJust ?? 0)}
+          value={
+            (data.checkoutCompletedClassic ?? 0) +
+            (data.checkoutCompletedJust ?? 0)
+          }
           subtitle={`${data.checkoutCompletedClassic ?? 0} Classic · ${data.checkoutCompletedJust ?? 0} JUST`}
           icon={ShoppingCart}
         />
@@ -128,7 +131,10 @@ export default function OverviewPage() {
         </ChartCard>
 
         <ChartCard title="Avg messages per conversation over time">
-          <TimeSeriesChart data={data.avgMessagesOverTime ?? []} color="#505048" />
+          <TimeSeriesChart
+            data={data.avgMessagesOverTime ?? []}
+            color="#505048"
+          />
         </ChartCard>
 
         <ChartCard title="Messages per conversation distribution">

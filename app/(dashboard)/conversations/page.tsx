@@ -49,32 +49,6 @@ interface UserJourney {
 
 type ConvWithShop = AiConversation & { shopName: string };
 
-const SOURCE_PAGE_COLORS: Record<string, string> = {
-  homepage:
-    "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
-  product: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  collection: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
-  other: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
-};
-
-const SOURCE_PAGE_LABELS: Record<string, string> = {
-  homepage: "Homepage",
-  product: "Product Page",
-  collection: "Collection",
-  other: "Other",
-};
-
-function SourcePageBadge({ source }: { source: string | null | undefined }) {
-  if (!source) return <span className="text-muted-foreground">—</span>;
-  return (
-    <span
-      className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium ${SOURCE_PAGE_COLORS[source] ?? ""}`}
-    >
-      {SOURCE_PAGE_LABELS[source] ?? source}
-    </span>
-  );
-}
-
 const ATTRIBUTION_COLORS: Record<string, string> = {
   direct: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   reinforcement:

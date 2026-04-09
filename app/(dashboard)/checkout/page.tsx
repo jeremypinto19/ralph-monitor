@@ -25,7 +25,6 @@ import {
   Tag,
 } from "lucide-react";
 import type {
-  CheckoutEvent,
   CheckoutUserGroup,
   Attribution,
   AiConversation,
@@ -76,7 +75,7 @@ export default function CheckoutPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [convos, setConvos] = useState<Map<string, AiConversation[]>>(
-    new Map()
+    new Map(),
   );
   const [loadingConvos, setLoadingConvos] = useState<Set<string>>(new Set());
 
@@ -122,7 +121,7 @@ export default function CheckoutPage() {
         });
       }
     },
-    [convos, loadingConvos, dateFrom, dateTo, shop]
+    [convos, loadingConvos, dateFrom, dateTo, shop],
   );
 
   const toggleRow = (group: CheckoutUserGroup) => {
@@ -164,9 +163,9 @@ export default function CheckoutPage() {
       g.events.filter(
         (e) =>
           e.event === "shopify_checkout_completed" ||
-          e.event === "just_checkout_completed"
+          e.event === "just_checkout_completed",
       ).length,
-    0
+    0,
   );
 
   const eventLabel = (evt: string) => {
@@ -243,13 +242,22 @@ export default function CheckoutPage() {
             <SelectItem value="all" className="text-[12px]">
               All events
             </SelectItem>
-            <SelectItem value="shopify_checkout_started" className="text-[12px]">
+            <SelectItem
+              value="shopify_checkout_started"
+              className="text-[12px]"
+            >
               Shopify Started
             </SelectItem>
-            <SelectItem value="shopify_checkout_completed" className="text-[12px]">
+            <SelectItem
+              value="shopify_checkout_completed"
+              className="text-[12px]"
+            >
               Shopify Completed
             </SelectItem>
-            <SelectItem value="just_ai_checkout_redirected" className="text-[12px]">
+            <SelectItem
+              value="just_ai_checkout_redirected"
+              className="text-[12px]"
+            >
               JUST Redirect
             </SelectItem>
           </SelectContent>
@@ -272,7 +280,9 @@ export default function CheckoutPage() {
         />
         <KpiCard
           title="Reinforcement"
-          value={(attrCounts.reinforcement ?? 0) + (attrCounts.pdp_shortcut ?? 0)}
+          value={
+            (attrCounts.reinforcement ?? 0) + (attrCounts.pdp_shortcut ?? 0)
+          }
           subtitle="PDP shortcut or reinforced"
           icon={ArrowRight}
         />
@@ -354,9 +364,7 @@ export default function CheckoutPage() {
               {isOpen && (
                 <div className="border-t border-border/50 bg-secondary/10 px-4 py-4 space-y-4">
                   {/* Attribution summary */}
-                  <div
-                    className={`rounded-md border px-4 py-3 ${cfg.bg}`}
-                  >
+                  <div className={`rounded-md border px-4 py-3 ${cfg.bg}`}>
                     <div className="flex items-center gap-2 mb-1">
                       <span
                         className={`text-[12px] font-semibold ${cfg.color}`}
@@ -410,7 +418,7 @@ export default function CheckoutPage() {
                             const isMatch = g.ralphRecommendations.some(
                               (r) =>
                                 r.toLowerCase().includes(p.toLowerCase()) ||
-                                p.toLowerCase().includes(r.toLowerCase())
+                                p.toLowerCase().includes(r.toLowerCase()),
                             );
                             return (
                               <li
@@ -517,13 +525,11 @@ export default function CheckoutPage() {
 }
 
 function ConversationSection({
-  distinctId,
   firstRalphTs,
   shopId,
   allConvos,
   isLoading,
 }: {
-  distinctId: string;
   firstRalphTs?: string | null;
   shopId: string;
   allConvos: AiConversation[];
@@ -585,7 +591,7 @@ function ConversationSection({
               const messages = convo.events.filter(
                 (ev) =>
                   ev.eventType === "user_message" ||
-                  ev.eventType === "assistant_message"
+                  ev.eventType === "assistant_message",
               );
               if (messages.length === 0) return null;
               return (
@@ -606,9 +612,12 @@ function ConversationSection({
                   <div className="divide-y divide-border/20">
                     {messages.map((msg, mi) => {
                       const isUser = msg.eventType === "user_message";
-                      const parsed = parseMessage((msg.data ?? {}) as Record<string, unknown>);
+                      const parsed = parseMessage(
+                        (msg.data ?? {}) as Record<string, unknown>,
+                      );
                       const text = parsed.text;
-                      if (!text && parsed.recommendations.length === 0) return null;
+                      if (!text && parsed.recommendations.length === 0)
+                        return null;
                       return (
                         <div
                           key={mi}
@@ -643,11 +652,18 @@ function ConversationSection({
                           {!isUser && parsed.recommendations.length > 0 && (
                             <div className="pl-7 mt-2 space-y-1 border-t border-border/20 pt-2">
                               {parsed.recommendations.map((rec, ri) => (
-                                <div key={ri} className="flex items-center gap-2 text-[12px]">
+                                <div
+                                  key={ri}
+                                  className="flex items-center gap-2 text-[12px]"
+                                >
                                   <Tag className="h-3 w-3 shrink-0 text-muted-foreground/50" />
-                                  <span className="font-medium">{rec.title}</span>
+                                  <span className="font-medium">
+                                    {rec.title}
+                                  </span>
                                   {rec.price && (
-                                    <span className="text-muted-foreground">{rec.price}</span>
+                                    <span className="text-muted-foreground">
+                                      {rec.price}
+                                    </span>
                                   )}
                                 </div>
                               ))}

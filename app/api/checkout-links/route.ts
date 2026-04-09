@@ -7,9 +7,7 @@ import type {
   Attribution,
 } from "@/lib/types";
 
-function extractRecommendations(
-  events: Record<string, unknown>[]
-): string[] {
+function extractRecommendations(events: Record<string, unknown>[]): string[] {
   const handles = new Set<string>();
   for (const evt of events) {
     if (evt.eventType !== "assistant_message") continue;
@@ -20,7 +18,10 @@ function extractRecommendations(
       if (typeof val !== "string") continue;
       let s = val.trim();
       if (s.startsWith("```")) {
-        s = s.replace(/^```\w*\n?/, "").replace(/\n?```$/, "").trim();
+        s = s
+          .replace(/^```\w*\n?/, "")
+          .replace(/\n?```$/, "")
+          .trim();
       }
       try {
         const parsed = JSON.parse(s);
@@ -48,17 +49,51 @@ function normalizeProduct(name: string): string {
 
 function extractBaseName(normalized: string): string {
   const colorWords = new Set([
-    "noir", "blanc", "rouge", "bleu", "vert", "rose", "gris", "beige",
-    "ocre", "bordeaux", "sapin", "ciel", "marine", "taupe", "leopard",
-    "kaki", "dune", "poudre", "craie", "ivoire", "cappuccino", "absinthe",
-    "fuchsia", "sangria", "sable", "canard", "camel", "or", "metal",
-    "bronze", "argent", "deau", "fonce", "rayures",
+    "noir",
+    "blanc",
+    "rouge",
+    "bleu",
+    "vert",
+    "rose",
+    "gris",
+    "beige",
+    "ocre",
+    "bordeaux",
+    "sapin",
+    "ciel",
+    "marine",
+    "taupe",
+    "leopard",
+    "kaki",
+    "dune",
+    "poudre",
+    "craie",
+    "ivoire",
+    "cappuccino",
+    "absinthe",
+    "fuchsia",
+    "sangria",
+    "sable",
+    "canard",
+    "camel",
+    "or",
+    "metal",
+    "bronze",
+    "argent",
+    "deau",
+    "fonce",
+    "rayures",
   ]);
-  const words = normalized.split(" ").filter((w) => !colorWords.has(w) && w.length > 0);
+  const words = normalized
+    .split(" ")
+    .filter((w) => !colorWords.has(w) && w.length > 0);
   return words.join(" ");
 }
 
-function productsMatch(recommended: string[], checkoutItems: string[]): boolean {
+function productsMatch(
+  recommended: string[],
+  checkoutItems: string[],
+): boolean {
   if (recommended.length === 0 || checkoutItems.length === 0) return false;
   const normRecs = recommended.map(normalizeProduct);
   const baseRecs = normRecs.map(extractBaseName);
@@ -72,7 +107,7 @@ function productsMatch(recommended: string[], checkoutItems: string[]): boolean 
         (br) =>
           br.length > 3 &&
           baseItem.length > 3 &&
-          (br.includes(baseItem) || baseItem.includes(br))
+          (br.includes(baseItem) || baseItem.includes(br)),
       )
     );
   });
@@ -84,27 +119,46 @@ function computeAttribution(
   recommendations: string[],
   checkoutProducts: string[],
   hasJustRedirect: boolean,
-  hasBuyClicked: boolean
+  hasBuyClicked: boolean,
 ): { attribution: Attribution; detail: string } {
   if (hasBuyClicked && hasJustRedirect) {
     if (recommendations.length > 0 && checkoutProducts.length === 0) {
-      return { attribution: "direct", detail: "User clicked Buy in Ralph and was redirected to JUST checkout" };
+      return {
+        attribution: "direct",
+        detail: "User clicked Buy in Ralph and was redirected to JUST checkout",
+      };
     }
     if (productsMatch(recommendations, checkoutProducts)) {
-      return { attribution: "direct", detail: "User clicked Buy in Ralph for a recommended product" };
+      return {
+        attribution: "direct",
+        detail: "User clicked Buy in Ralph for a recommended product",
+      };
     }
-    return { attribution: "pdp_shortcut", detail: "User clicked Buy in Ralph for a product they were already viewing" };
+    return {
+      attribution: "pdp_shortcut",
+      detail:
+        "User clicked Buy in Ralph for a product they were already viewing",
+    };
   }
 
   if (hasJustRedirect && !hasBuyClicked) {
     if (recommendations.length > 0) {
-      return { attribution: "direct", detail: "User was redirected to JUST checkout after Ralph interaction" };
+      return {
+        attribution: "direct",
+        detail: "User was redirected to JUST checkout after Ralph interaction",
+      };
     }
-    return { attribution: "pdp_shortcut", detail: "JUST checkout redirect, no specific recommendation match" };
+    return {
+      attribution: "pdp_shortcut",
+      detail: "JUST checkout redirect, no specific recommendation match",
+    };
   }
 
   if (!firstRalphTs) {
-    return { attribution: "unknown", detail: "No Ralph interaction timestamp found" };
+    return {
+      attribution: "unknown",
+      detail: "No Ralph interaction timestamp found",
+    };
   }
 
   const ralphTime = new Date(firstRalphTs).getTime();
@@ -112,16 +166,30 @@ function computeAttribution(
 
   if (cartTime && cartTime < ralphTime) {
     if (productsMatch(recommendations, checkoutProducts)) {
-      return { attribution: "reinforcement", detail: "Cart was built before Ralph, but Ralph recommended the same product family" };
+      return {
+        attribution: "reinforcement",
+        detail:
+          "Cart was built before Ralph, but Ralph recommended the same product family",
+      };
     }
-    return { attribution: "not_influenced", detail: "Cart was built before Ralph interaction, with different products" };
+    return {
+      attribution: "not_influenced",
+      detail:
+        "Cart was built before Ralph interaction, with different products",
+    };
   }
 
   if (productsMatch(recommendations, checkoutProducts)) {
-    return { attribution: "direct", detail: "User checked out with a product Ralph recommended" };
+    return {
+      attribution: "direct",
+      detail: "User checked out with a product Ralph recommended",
+    };
   }
 
-  return { attribution: "not_influenced", detail: "Checkout products don't match Ralph's recommendations" };
+  return {
+    attribution: "not_influenced",
+    detail: "Checkout products don't match Ralph's recommendations",
+  };
 }
 
 export async function GET(request: Request) {
@@ -194,13 +262,16 @@ export async function GET(request: Request) {
     `);
 
     // Group events by user
-    const userEvents = new Map<string, Array<{
-      event: string;
-      timestamp: string;
-      shopId: string | null;
-      dataJson: string;
-      ctxJson: string;
-    }>>();
+    const userEvents = new Map<
+      string,
+      Array<{
+        event: string;
+        timestamp: string;
+        shopId: string | null;
+        dataJson: string;
+        ctxJson: string;
+      }>
+    >();
 
     for (const row of eventsResult.results) {
       const did = row[0] as string;
@@ -237,8 +308,9 @@ export async function GET(request: Request) {
     const userGroups: CheckoutUserGroup[] = [];
 
     for (const [did, rawEvents] of userEvents) {
-      const hasCheckout = rawEvents.some((e) =>
-        e.event.includes("checkout") || e.event === "just_ai_buy_clicked"
+      const hasCheckout = rawEvents.some(
+        (e) =>
+          e.event.includes("checkout") || e.event === "just_ai_buy_clicked",
       );
       if (!hasCheckout) continue;
 
@@ -267,8 +339,11 @@ export async function GET(request: Request) {
             const title =
               d?.cartLine?.merchandise?.product?.title ??
               d?.productVariant?.product?.title;
-            if (title && !allLineItems.includes(title)) allLineItems.push(title);
-          } catch { /* ignore */ }
+            if (title && !allLineItems.includes(title))
+              allLineItems.push(title);
+          } catch {
+            /* ignore */
+          }
           continue;
         }
 
@@ -286,12 +361,15 @@ export async function GET(request: Request) {
             const d = JSON.parse(jsonStr);
 
             if (!customerName && d.customer?.firstName) {
-              customerName = `${d.customer.firstName} ${d.customer.lastName ?? ""}`.trim();
+              customerName =
+                `${d.customer.firstName} ${d.customer.lastName ?? ""}`.trim();
             }
 
             const co = d.checkout ?? d;
-            if (co.totalPrice) totalPrice = totalPrice ?? parseFloat(co.totalPrice);
-            if (co.subtotalPrice?.amount) totalPrice = totalPrice ?? parseFloat(co.subtotalPrice.amount);
+            if (co.totalPrice)
+              totalPrice = totalPrice ?? parseFloat(co.totalPrice);
+            if (co.subtotalPrice?.amount)
+              totalPrice = totalPrice ?? parseFloat(co.subtotalPrice.amount);
             orderId = orderId ?? co.orderId ?? d.orderId ?? null;
             orderName = orderName ?? co.orderName ?? d.orderName ?? null;
             currency = currency ?? co.currencyCode ?? d.currency ?? null;
@@ -300,10 +378,13 @@ export async function GET(request: Request) {
             for (const li of items) {
               if (li.title) {
                 lineItems.push({ title: li.title, quantity: li.quantity ?? 1 });
-                if (!allLineItems.includes(li.title)) allLineItems.push(li.title);
+                if (!allLineItems.includes(li.title))
+                  allLineItems.push(li.title);
               }
             }
-          } catch { /* ignore */ }
+          } catch {
+            /* ignore */
+          }
         }
 
         checkoutEvents.push({
@@ -326,23 +407,23 @@ export async function GET(request: Request) {
       const matchWindow = 90_000;
       const allRecs: string[] = [];
 
-      for (const [cid, items] of convoMap) {
+      for (const [, items] of convoMap) {
         const sameShop = items.some((i) => (i.shopId as string) === ai.shopId);
         if (!sameShop) continue;
 
         const startedItem = items.find(
-          (i) => (i.eventType as string) === "conversation_started"
+          (i) => (i.eventType as string) === "conversation_started",
         );
         const ts = startedItem
           ? (startedItem.createdAt as string)
-          : (items[0]?.createdAt as string) ?? "";
+          : ((items[0]?.createdAt as string) ?? "");
         if (!ts) continue;
 
         const convoTime = new Date(ts).getTime();
         const diff = Math.abs(convoTime - ralphTs.getTime());
         if (diff <= matchWindow) {
           const recs = extractRecommendations(
-            items as unknown as Record<string, unknown>[]
+            items as unknown as Record<string, unknown>[],
           );
           allRecs.push(...recs);
         }
@@ -351,8 +432,10 @@ export async function GET(request: Request) {
       // Also try broader matching: all conversations for this shop within the date range
       // that are close to any Ralph event for this user
       if (allRecs.length === 0) {
-        for (const [cid, items] of convoMap) {
-          const sameShop = items.some((i) => (i.shopId as string) === ai.shopId);
+        for (const [, items] of convoMap) {
+          const sameShop = items.some(
+            (i) => (i.shopId as string) === ai.shopId,
+          );
           if (!sameShop) continue;
 
           for (const item of items) {
@@ -362,7 +445,7 @@ export async function GET(request: Request) {
             const diff = Math.abs(convoTime - ralphTs.getTime());
             if (diff <= 300_000) {
               const recs = extractRecommendations(
-                items as unknown as Record<string, unknown>[]
+                items as unknown as Record<string, unknown>[],
               );
               allRecs.push(...recs);
               break;
@@ -379,7 +462,7 @@ export async function GET(request: Request) {
         uniqueRecs,
         allLineItems,
         hasJustRedirect,
-        hasBuyClicked
+        hasBuyClicked,
       );
 
       userGroups.push({
