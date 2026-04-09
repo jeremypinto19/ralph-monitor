@@ -49,7 +49,8 @@ interface UserJourney {
 type ConvWithShop = AiConversation & { shopName: string };
 
 const SOURCE_PAGE_COLORS: Record<string, string> = {
-  homepage: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  homepage:
+    "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
   product: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
   collection: "bg-teal-100 text-teal-800 dark:bg-teal-900 dark:text-teal-200",
   other: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-300",
@@ -75,9 +76,12 @@ function SourcePageBadge({ source }: { source: string | null | undefined }) {
 
 const ATTRIBUTION_COLORS: Record<string, string> = {
   direct: "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-  reinforcement: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-  pdp_shortcut: "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-  not_influenced: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
+  reinforcement:
+    "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
+  pdp_shortcut:
+    "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
+  not_influenced:
+    "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300",
   unknown: "bg-gray-100 text-gray-500 dark:bg-gray-800 dark:text-gray-400",
 };
 
@@ -100,7 +104,11 @@ function AttributionBadge({ attribution }: { attribution: string | null }) {
   );
 }
 
-function CheckoutBadge({ enrichment }: { enrichment: ConversationEnrichment | undefined }) {
+function CheckoutBadge({
+  enrichment,
+}: {
+  enrichment: ConversationEnrichment | undefined;
+}) {
   if (!enrichment || !enrichment.hasCheckout) {
     return <span className="text-muted-foreground">—</span>;
   }
@@ -120,14 +128,24 @@ function CheckoutBadge({ enrichment }: { enrichment: ConversationEnrichment | un
       )}
       {type && (
         <Badge variant="outline" className="text-[10px] uppercase">
-          {type === "both" ? "JUST+Shopify" : type === "just" ? "JUST" : "Shopify"}
+          {type === "both"
+            ? "JUST+Shopify"
+            : type === "just"
+              ? "JUST"
+              : "Shopify"}
         </Badge>
       )}
     </div>
   );
 }
 
-function JourneyTimeline({ journey, loading }: { journey: UserJourney | null; loading: boolean }) {
+function JourneyTimeline({
+  journey,
+  loading,
+}: {
+  journey: UserJourney | null;
+  loading: boolean;
+}) {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
@@ -152,7 +170,9 @@ function JourneyTimeline({ journey, loading }: { journey: UserJourney | null; lo
 
   return (
     <div className="space-y-3">
-      <div className="rounded-md bg-muted/50 p-3 text-sm">{journey.summary}</div>
+      <div className="rounded-md bg-muted/50 p-3 text-sm">
+        {journey.summary}
+      </div>
       <div className="relative ml-3 border-l border-border pl-4">
         {journey.timeline.map((step, i) => {
           const isCheckout = step.rawEvent.includes("checkout");
@@ -168,7 +188,9 @@ function JourneyTimeline({ journey, loading }: { journey: UserJourney | null; lo
                 <span className="shrink-0 font-mono text-xs text-muted-foreground">
                   {format(new Date(step.time), "HH:mm:ss")}
                 </span>
-                <span className={`font-medium ${isCheckout || isBuy ? "text-green-700 dark:text-green-400" : ""}`}>
+                <span
+                  className={`font-medium ${isCheckout || isBuy ? "text-green-700 dark:text-green-400" : ""}`}
+                >
                   {step.event}
                 </span>
               </div>
@@ -185,7 +207,11 @@ function JourneyTimeline({ journey, loading }: { journey: UserJourney | null; lo
   );
 }
 
-function AttributionDetail({ enrichment }: { enrichment: ConversationEnrichment | undefined }) {
+function AttributionDetail({
+  enrichment,
+}: {
+  enrichment: ConversationEnrichment | undefined;
+}) {
   if (!enrichment) {
     return (
       <div className="flex items-center justify-center py-8 text-sm text-muted-foreground">
@@ -194,7 +220,13 @@ function AttributionDetail({ enrichment }: { enrichment: ConversationEnrichment 
     );
   }
 
-  const { ralphRecommendations, checkoutProducts, attribution, attributionDetail, checkoutEvents } = enrichment;
+  const {
+    ralphRecommendations,
+    checkoutProducts,
+    attribution,
+    attributionDetail,
+    checkoutEvents,
+  } = enrichment;
 
   return (
     <div className="space-y-4">
@@ -205,7 +237,9 @@ function AttributionDetail({ enrichment }: { enrichment: ConversationEnrichment 
           <AttributionBadge attribution={attribution} />
         </div>
         {attributionDetail && (
-          <p className="mt-1 text-xs text-muted-foreground">{attributionDetail}</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            {attributionDetail}
+          </p>
         )}
       </div>
 
@@ -214,7 +248,9 @@ function AttributionDetail({ enrichment }: { enrichment: ConversationEnrichment 
         <div className="rounded-md border p-3">
           <h4 className="mb-2 text-sm font-medium">Ralph Recommendations</h4>
           {ralphRecommendations.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No recommendations found</p>
+            <p className="text-xs text-muted-foreground">
+              No recommendations found
+            </p>
           ) : (
             <ul className="space-y-1">
               {ralphRecommendations.map((rec, i) => (
@@ -230,7 +266,9 @@ function AttributionDetail({ enrichment }: { enrichment: ConversationEnrichment 
         <div className="rounded-md border p-3">
           <h4 className="mb-2 text-sm font-medium">Checkout Products</h4>
           {checkoutProducts.length === 0 ? (
-            <p className="text-xs text-muted-foreground">No checkout products found</p>
+            <p className="text-xs text-muted-foreground">
+              No checkout products found
+            </p>
           ) : (
             <ul className="space-y-1">
               {checkoutProducts.map((p, i) => (
@@ -254,11 +292,14 @@ function AttributionDetail({ enrichment }: { enrichment: ConversationEnrichment 
                   {format(new Date(evt.timestamp), "MMM d, HH:mm:ss")}
                 </span>
                 <Badge variant="outline" className="text-[10px]">
-                  {evt.event.replace(/^(shopify_|just_)/, "").replace(/_/g, " ")}
+                  {evt.event
+                    .replace(/^(shopify_|just_)/, "")
+                    .replace(/_/g, " ")}
                 </Badge>
                 {evt.totalPrice != null && (
                   <span className="text-muted-foreground">
-                    {evt.currency ?? "€"}{evt.totalPrice.toFixed(2)}
+                    {evt.currency ?? "€"}
+                    {evt.totalPrice.toFixed(2)}
                   </span>
                 )}
               </div>
@@ -274,7 +315,7 @@ export default function ConversationsPage() {
   const [groups, setGroups] = useState<AiConversationShopGroup[]>([]);
   const [loading, setLoading] = useState(true);
   const [shop, setShop] = useState("all");
-  const [dateFrom, setDateFrom] = useState(() => subDays(new Date(), 30));
+  const [dateFrom, setDateFrom] = useState(() => subDays(new Date(), 7));
   const [dateTo, setDateTo] = useState(() => new Date());
   const [device, setDevice] = useState("all");
   const [search, setSearch] = useState("");
@@ -282,29 +323,45 @@ export default function ConversationsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Enrichment state
-  const [enrichments, setEnrichments] = useState<Record<string, ConversationEnrichment>>({});
+  const [enrichments, setEnrichments] = useState<
+    Record<string, ConversationEnrichment>
+  >({});
   const [enriching, setEnriching] = useState(false);
 
   // Journey state keyed by conversationId (lazy-loaded)
-  const [journeys, setJourneys] = useState<Record<string, UserJourney | null>>({});
-  const [journeyLoading, setJourneyLoading] = useState<Record<string, boolean>>({});
+  const [journeys, setJourneys] = useState<Record<string, UserJourney | null>>(
+    {},
+  );
+  const [journeyLoading, setJourneyLoading] = useState<Record<string, boolean>>(
+    {},
+  );
 
   useEffect(() => {
-    setLoading(true);
-    const params = new URLSearchParams();
-    params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
-    params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
-    if (shop !== "all") params.set("shopId", shop);
-    if (device !== "all") params.set("device", device);
+    let cancelled = false;
+    void (async () => {
+      setLoading(true);
+      const params = new URLSearchParams();
+      params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
+      params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
+      if (shop !== "all") params.set("shopId", shop);
+      if (device !== "all") params.set("device", device);
 
-    fetch(`/api/conversations?${params}`)
-      .then((r) => r.json())
-      .then((d) => {
-        setGroups(d.groups ?? []);
-        setEnrichments({});
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
+      try {
+        const r = await fetch(`/api/conversations?${params}`);
+        const d = await r.json();
+        if (!cancelled) {
+          setGroups(d.groups ?? []);
+          setEnrichments({});
+        }
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [shop, dateFrom, dateTo, device]);
 
   // Trigger enrichment once conversations load
@@ -316,7 +373,7 @@ export default function ConversationsPage() {
         conversationId: c.conversationId,
         shopId: c.shopId,
         startedAt: c.startedAt ?? "",
-      }))
+      })),
     );
 
     if (allConvos.length === 0) return;
@@ -324,41 +381,62 @@ export default function ConversationsPage() {
     // Only enrich conversations that have messages (likely to have interesting data)
     const toEnrich = allConvos.filter((c) => {
       const group = groups.find((g) => g.shopId === c.shopId);
-      const conv = group?.conversations.find((co) => co.conversationId === c.conversationId);
+      const conv = group?.conversations.find(
+        (co) => co.conversationId === c.conversationId,
+      );
       return conv && conv.messageCount > 0;
     });
 
     if (toEnrich.length === 0) return;
 
-    setEnriching(true);
-    fetch("/api/conversations/enrich", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversations: toEnrich }),
-    })
-      .then((r) => r.json())
-      .then((d) => {
-        if (d.enrichments) setEnrichments(d.enrichments);
-      })
-      .catch(console.error)
-      .finally(() => setEnriching(false));
+    let cancelled = false;
+    void (async () => {
+      setEnriching(true);
+      try {
+        const r = await fetch("/api/conversations/enrich", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ conversations: toEnrich }),
+        });
+        const d = await r.json();
+        if (!cancelled && d.enrichments) setEnrichments(d.enrichments);
+      } catch (err) {
+        console.error(err);
+      } finally {
+        if (!cancelled) setEnriching(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
   }, [groups]);
 
-  const loadJourney = useCallback((conv: ConvWithShop) => {
-    if (journeys[conv.conversationId] !== undefined) return;
-    setJourneyLoading((prev) => ({ ...prev, [conv.conversationId]: true }));
-    const params = new URLSearchParams();
-    params.set("shopId", conv.shopId);
-    if (conv.startedAt) params.set("startedAt", conv.startedAt);
-    params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
-    params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
+  const loadJourney = useCallback(
+    (conv: ConvWithShop) => {
+      if (journeys[conv.conversationId] !== undefined) return;
+      setJourneyLoading((prev) => ({ ...prev, [conv.conversationId]: true }));
+      const params = new URLSearchParams();
+      params.set("conversationId", conv.conversationId);
+      params.set("shopId", conv.shopId);
+      if (conv.startedAt) params.set("startedAt", conv.startedAt);
+      params.set("dateFrom", format(dateFrom, "yyyy-MM-dd"));
+      params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
 
-    fetch(`/api/user-journey?${params}`)
-      .then((r) => r.json())
-      .then((d) => setJourneys((prev) => ({ ...prev, [conv.conversationId]: d })))
-      .catch(console.error)
-      .finally(() => setJourneyLoading((prev) => ({ ...prev, [conv.conversationId]: false })));
-  }, [dateFrom, dateTo, journeys]);
+      fetch(`/api/user-journey?${params}`)
+        .then((r) => r.json())
+        .then((d) =>
+          setJourneys((prev) => ({ ...prev, [conv.conversationId]: d })),
+        )
+        .catch(console.error)
+        .finally(() =>
+          setJourneyLoading((prev) => ({
+            ...prev,
+            [conv.conversationId]: false,
+          })),
+        );
+    },
+    [dateFrom, dateTo, journeys],
+  );
 
   const toggleExpand = useCallback(
     (conv: ConvWithShop) => {
@@ -369,7 +447,7 @@ export default function ConversationsPage() {
         loadJourney(conv);
       }
     },
-    [expandedId, loadJourney]
+    [expandedId, loadJourney],
   );
 
   const allConversations = useMemo(() => {
@@ -377,7 +455,7 @@ export default function ConversationsPage() {
       g.conversations.map((c) => ({
         ...c,
         shopName: g.shopName ?? g.shopId,
-      }))
+      })),
     );
     flat.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
 
@@ -393,16 +471,16 @@ export default function ConversationsPage() {
         c.shopName.toLowerCase().includes(lower) ||
         c.events.some((e) => {
           const msg = extractPlainText(
-            (e.data ?? {}) as Record<string, unknown>
+            (e.data ?? {}) as Record<string, unknown>,
           );
           return msg.toLowerCase().includes(lower);
-        })
+        }),
     );
   }, [groups, search, hideEmpty]);
 
   const enrichedCount = useMemo(
     () => Object.values(enrichments).filter((e) => e.hasCheckout).length,
-    [enrichments]
+    [enrichments],
   );
 
   return (
@@ -446,7 +524,10 @@ export default function ConversationsPage() {
             checked={hideEmpty}
             onCheckedChange={setHideEmpty}
           />
-          <label htmlFor="hide-empty" className="text-sm cursor-pointer select-none">
+          <label
+            htmlFor="hide-empty"
+            className="text-sm cursor-pointer select-none"
+          >
             Hide empty
           </label>
         </div>
@@ -456,7 +537,9 @@ export default function ConversationsPage() {
         <span>
           {loading ? "Loading..." : `${allConversations.length} conversations`}
         </span>
-        {enriching && <span className="text-xs">· Enriching checkout data...</span>}
+        {enriching && (
+          <span className="text-xs">· Enriching checkout data...</span>
+        )}
         {!enriching && enrichedCount > 0 && (
           <span className="text-xs">
             · {enrichedCount} with checkout activity
@@ -512,7 +595,9 @@ export default function ConversationsPage() {
                     </TableCell>
                     <TableCell>
                       {c.mode ? (
-                        <Badge variant="secondary" className="capitalize">{c.mode}</Badge>
+                        <Badge variant="secondary" className="capitalize">
+                          {c.mode}
+                        </Badge>
                       ) : (
                         "—"
                       )}
@@ -525,7 +610,9 @@ export default function ConversationsPage() {
                         attribution={enrichment?.attribution ?? null}
                       />
                     </TableCell>
-                    <TableCell className="text-xs">{c.endReason ?? "—"}</TableCell>
+                    <TableCell className="text-xs">
+                      {c.endReason ?? "—"}
+                    </TableCell>
                     <TableCell className="text-right font-mono text-xs text-muted-foreground">
                       {c.conversationId.slice(0, 8)}
                     </TableCell>
@@ -535,9 +622,11 @@ export default function ConversationsPage() {
                       <TableCell colSpan={10} className="p-0">
                         <div className="border-t bg-muted/20 px-6 py-4">
                           <div className="mb-3 flex items-center gap-2">
-                            <span className="text-sm font-semibold">Conversation</span>
+                            <span className="text-sm font-semibold">
+                              Conversation
+                            </span>
                             <span className="font-mono text-xs text-muted-foreground">
-                              {c.conversationId.slice(0, 12)}
+                              {c.conversationId}
                             </span>
                             {enrichment?.hasCheckout && (
                               <CheckoutBadge enrichment={enrichment} />
@@ -546,8 +635,12 @@ export default function ConversationsPage() {
                           <Tabs defaultValue="chat" className="w-full">
                             <TabsList className="grid w-full max-w-md grid-cols-3">
                               <TabsTrigger value="chat">Chat</TabsTrigger>
-                              <TabsTrigger value="journey">User Journey</TabsTrigger>
-                              <TabsTrigger value="attribution">Attribution</TabsTrigger>
+                              <TabsTrigger value="journey">
+                                User Journey
+                              </TabsTrigger>
+                              <TabsTrigger value="attribution">
+                                Attribution
+                              </TabsTrigger>
                             </TabsList>
 
                             <TabsContent value="chat">
@@ -556,12 +649,13 @@ export default function ConversationsPage() {
                                   .filter(
                                     (e) =>
                                       e.eventType === "user_message" ||
-                                      e.eventType === "assistant_message"
+                                      e.eventType === "assistant_message",
                                   )
                                   .map((e, i) => {
-                                    const isUser = e.eventType === "user_message";
+                                    const isUser =
+                                      e.eventType === "user_message";
                                     const parsed = parseMessage(
-                                      (e.data ?? {}) as Record<string, unknown>
+                                      (e.data ?? {}) as Record<string, unknown>,
                                     );
                                     const displayText =
                                       parsed.text || JSON.stringify(e.data);
@@ -576,37 +670,43 @@ export default function ConversationsPage() {
                                       >
                                         <div className="mb-1 text-xs opacity-70">
                                           {isUser ? "User" : "Ralph"} &middot;{" "}
-                                          {format(new Date(e.createdAt), "HH:mm:ss")}
+                                          {format(
+                                            new Date(e.createdAt),
+                                            "HH:mm:ss",
+                                          )}
                                         </div>
                                         <div className="whitespace-pre-wrap break-words">
                                           {displayText}
                                         </div>
-                                        {!isUser && parsed.recommendations.length > 0 && (
-                                          <div className="mt-2 space-y-1 border-t border-border/30 pt-2">
-                                            {parsed.recommendations.map((rec, ri) => (
-                                              <div
-                                                key={ri}
-                                                className="flex items-center gap-2 text-xs"
-                                              >
-                                                <span className="font-medium">
-                                                  {rec.title}
-                                                </span>
-                                                {rec.price && (
-                                                  <span className="text-muted-foreground">
-                                                    {rec.price}
-                                                  </span>
-                                                )}
-                                              </div>
-                                            ))}
-                                          </div>
-                                        )}
+                                        {!isUser &&
+                                          parsed.recommendations.length > 0 && (
+                                            <div className="mt-2 space-y-1 border-t border-border/30 pt-2">
+                                              {parsed.recommendations.map(
+                                                (rec, ri) => (
+                                                  <div
+                                                    key={ri}
+                                                    className="flex items-center gap-2 text-xs"
+                                                  >
+                                                    <span className="font-medium">
+                                                      {rec.title}
+                                                    </span>
+                                                    {rec.price && (
+                                                      <span className="text-muted-foreground">
+                                                        {rec.price}
+                                                      </span>
+                                                    )}
+                                                  </div>
+                                                ),
+                                              )}
+                                            </div>
+                                          )}
                                       </div>
                                     );
                                   })}
                                 {c.events.filter(
                                   (e) =>
                                     e.eventType === "user_message" ||
-                                    e.eventType === "assistant_message"
+                                    e.eventType === "assistant_message",
                                 ).length === 0 && (
                                   <div className="py-8 text-center text-sm text-muted-foreground">
                                     No messages in this conversation.
@@ -619,7 +719,9 @@ export default function ConversationsPage() {
                               <div className="max-h-[60vh] overflow-y-auto pr-4">
                                 <JourneyTimeline
                                   journey={journeys[c.conversationId] ?? null}
-                                  loading={journeyLoading[c.conversationId] ?? false}
+                                  loading={
+                                    journeyLoading[c.conversationId] ?? false
+                                  }
                                 />
                               </div>
                             </TabsContent>

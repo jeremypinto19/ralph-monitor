@@ -10,7 +10,12 @@ import type {
 
 function sanitize(val: unknown): unknown {
   if (val === null || val === undefined) return val;
-  if (typeof val === "number" || typeof val === "string" || typeof val === "boolean") return val;
+  if (
+    typeof val === "number" ||
+    typeof val === "string" ||
+    typeof val === "boolean"
+  )
+    return val;
   if (Array.isArray(val)) return val.map(sanitize);
   if (typeof val === "object") {
     const out: Record<string, unknown> = {};
@@ -25,7 +30,8 @@ function sanitize(val: unknown): unknown {
 function classifyUrl(url: string): SourcePage {
   try {
     const path = new URL(url).pathname.replace(/\/+$/, "");
-    if (path === "" || path === "/" || /^\/(en|fr|de|es|it)$/i.test(path)) return "homepage";
+    if (path === "" || path === "/" || /^\/(en|fr|de|es|it)$/i.test(path))
+      return "homepage";
     if (/\/products\//i.test(path)) return "product";
     if (/\/collections/i.test(path)) return "collection";
     return "other";
@@ -36,14 +42,139 @@ function classifyUrl(url: string): SourcePage {
 
 /** PostHog interprets bare datetime strings as Europe/Paris (project tz). */
 function utcToParis(d: Date): string {
-  return d.toLocaleString("sv-SE", { timeZone: "Europe/Paris" }).replace("T", " ");
+  return d
+    .toLocaleString("sv-SE", { timeZone: "Europe/Paris" })
+    .replace("T", " ");
+}
+
+function hogqlQuote(val: string): string {
+  return `'${val.replace(/'/g, "\\'")}'`;
+}
+
+const POSTHOG_CONVERSATION_ID_BATCH = 100;
+
+interface PhJustAiRow {
+  conversationId: string;
+  event: string;
+  currentUrl: string;
+  deviceType: string | null;
+  mode: string | null;
+}
+
+async function fetchJustAiRowsByConversationIds(
+  conversationIds: string[],
+  shopFilter: string | null,
+  phFrom: string,
+  phTo: string,
+): Promise<PhJustAiRow[]> {
+  const ids = [...new Set(conversationIds.filter(Boolean))];
+  if (ids.length === 0) return [];
+
+  const shopClause = shopFilter
+    ? `AND JSONExtractString(properties, 'shopId') = ${hogqlQuote(shopFilter)}`
+    : "";
+
+  const rows: PhJustAiRow[] = [];
+
+  for (let i = 0; i < ids.length; i += POSTHOG_CONVERSATION_ID_BATCH) {
+    const batch = ids.slice(i, i + POSTHOG_CONVERSATION_ID_BATCH);
+    const inList = batch.map(hogqlQuote).join(", ");
+
+    const result = await queryPostHog(`
+      SELECT
+        JSONExtractString(properties, 'conversationId') AS conversation_id,
+        event,
+        properties.\`$current_url\` AS current_url,
+        properties.\`$device_type\` AS device_type,
+        JSONExtractString(properties, 'mode') AS mode
+      FROM events
+      WHERE startsWith(event, 'just_ai_')
+        AND JSONExtractString(properties, 'conversationId') IN (${inList})
+        ${shopClause}
+        AND timestamp >= '${phFrom}'
+        AND timestamp <= '${phTo}'
+      ORDER BY conversation_id, timestamp ASC
+      LIMIT 200000
+    `);
+
+    for (const row of result.results) {
+      const cid = row[0] as string;
+      if (!cid) continue;
+      rows.push({
+        conversationId: cid,
+        event: (row[1] as string) ?? "",
+        currentUrl: (row[2] as string) || "",
+        deviceType: (row[3] as string) || null,
+        mode: (row[4] as string) || null,
+      });
+    }
+  }
+
+  return rows;
+}
+
+function applyPostHogRowsToConversations(
+  conversations: AiConversation[],
+  rows: PhJustAiRow[],
+): void {
+  const byCid = new Map<string, PhJustAiRow[]>();
+  for (const r of rows) {
+    if (!byCid.has(r.conversationId)) byCid.set(r.conversationId, []);
+    byCid.get(r.conversationId)!.push(r);
+  }
+
+  for (const conv of conversations) {
+    const list = byCid.get(conv.conversationId);
+    if (!list || list.length === 0) continue;
+
+    let sessionUrl = "";
+    let sessionDevice: string | null = null;
+    let sessionMode: string | null = null;
+    let firstUrl = "";
+    let firstDevice: string | null = null;
+    let firstMode: string | null = null;
+
+    for (const r of list) {
+      if (r.currentUrl && !firstUrl) firstUrl = r.currentUrl;
+      if (r.deviceType && !firstDevice) firstDevice = r.deviceType;
+      if (r.mode && !firstMode) firstMode = r.mode;
+
+      if (r.event === "just_ai_session_started") {
+        if (r.currentUrl && !sessionUrl) sessionUrl = r.currentUrl;
+        if (r.deviceType && !sessionDevice) sessionDevice = r.deviceType;
+        if (r.mode && !sessionMode) sessionMode = r.mode;
+      }
+    }
+
+    const urlForPage = sessionUrl || firstUrl;
+    if (urlForPage) {
+      conv.sourcePage = classifyUrl(urlForPage);
+    }
+
+    if (!conv.device) {
+      const d = sessionDevice ?? firstDevice;
+      if (d) conv.device = d.toLowerCase();
+    }
+
+    if (!conv.mode) {
+      const m = sessionMode ?? firstMode;
+      if (m) {
+        conv.mode = m.toLowerCase();
+      } else {
+        const urlForMode = sessionUrl || firstUrl;
+        if (urlForMode) {
+          conv.mode = /\/products\//i.test(urlForMode) ? "product" : "search";
+        }
+      }
+    }
+  }
 }
 
 function buildConversation(
   cid: string,
   events: AiConversationEvent[],
   shopId: string,
-  sessionId: string | null
+  sessionId: string | null,
 ): AiConversation {
   events.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 
@@ -60,7 +191,9 @@ function buildConversation(
   }
 
   const userMessages = events.filter((e) => e.eventType === "user_message");
-  const assistantMessages = events.filter((e) => e.eventType === "assistant_message");
+  const assistantMessages = events.filter(
+    (e) => e.eventType === "assistant_message",
+  );
   const toolCalls = events.filter((e) => e.eventType === "tool_call");
 
   let device: string | null = null;
@@ -124,24 +257,32 @@ export async function GET(request: Request) {
     let conversations: AiConversation[] = [];
     for (const [cid, events] of eventsByConvo) {
       conversations.push(
-        buildConversation(cid, events, convoShop.get(cid) ?? "", convoSession.get(cid) ?? null)
+        buildConversation(
+          cid,
+          events,
+          convoShop.get(cid) ?? "",
+          convoSession.get(cid) ?? null,
+        ),
       );
     }
 
-    conversations.sort((a, b) => (b.startedAt ?? "").localeCompare(a.startedAt ?? ""));
+    conversations.sort((a, b) =>
+      (b.startedAt ?? "").localeCompare(a.startedAt ?? ""),
+    );
 
     if (shopFilter) {
       conversations = conversations.filter((c) => c.shopId === shopFilter);
     }
     if (dateFrom) {
       conversations = conversations.filter(
-        (c) => c.startedAt && c.startedAt >= dateFrom
+        (c) => c.startedAt && c.startedAt >= dateFrom,
       );
     }
     if (dateTo) {
-      const dateToEnd = dateTo.length === 10 ? `${dateTo}T23:59:59.999Z` : dateTo;
+      const dateToEnd =
+        dateTo.length === 10 ? `${dateTo}T23:59:59.999Z` : dateTo;
       conversations = conversations.filter(
-        (c) => c.startedAt && c.startedAt <= dateToEnd
+        (c) => c.startedAt && c.startedAt <= dateToEnd,
       );
     }
     if (deviceFilter) {
@@ -154,113 +295,27 @@ export async function GET(request: Request) {
     const shopIds = [...new Set(conversations.map((c) => c.shopId))];
     const shopNames = await resolveShopNames(shopIds);
 
-    // Resolve source page + device from PostHog session_started events
+    // PostHog: just_ai_* payloads include conversationId — no time-window guessing
     if (conversations.length > 0 && dateFrom) {
       try {
         const phFrom = utcToParis(new Date(dateFrom));
-        const phTo = utcToParis(dateTo ? new Date(dateTo.length === 10 ? `${dateTo}T23:59:59Z` : dateTo) : new Date("2099-12-31"));
-        const shopClause = shopFilter
-          ? `AND JSONExtractString(properties, 'shopId') = '${shopFilter.replace(/'/g, "\\'")}'`
-          : "";
-
-        // Query 1: just_ai_session_started for device, mode, and URL
-        const result = await queryPostHog(`
-          SELECT
-            JSONExtractString(properties, 'shopId') AS shop_id,
-            toString(toUnixTimestamp(timestamp)) AS unix_ts,
-            properties.\`$current_url\` AS current_url,
-            properties.\`$device_type\` AS device_type,
-            JSONExtractString(properties, 'mode') AS mode
-          FROM events
-          WHERE event = 'just_ai_session_started'
-            ${shopClause}
-            AND timestamp >= '${phFrom}'
-            AND timestamp <= '${phTo}'
-          ORDER BY timestamp ASC
-          LIMIT 50000
-        `);
-
-        const phEntries: { shopId: string; unixTs: number; url: string; deviceType: string | null; mode: string | null }[] = [];
-        for (const row of result.results) {
-          const sid = row[0] as string;
-          const unixTs = parseInt(row[1] as string, 10);
-          const url = (row[2] as string) || "";
-          const deviceType = (row[3] as string) || null;
-          const mode = (row[4] as string) || null;
-          if (sid) phEntries.push({ shopId: sid, unixTs, url, deviceType, mode });
-        }
-
-        // Query 2: also fetch just_ai_widget_opened events which carry mode (search/product)
-        const widgetResult = await queryPostHog(`
-          SELECT
-            JSONExtractString(properties, 'shopId') AS shop_id,
-            toString(toUnixTimestamp(timestamp)) AS unix_ts,
-            properties.\`$current_url\` AS current_url,
-            JSONExtractString(properties, 'mode') AS mode
-          FROM events
-          WHERE event IN ('just_ai_widget_opened', 'just_ai_trigger_bar_expanded', 'just_ai_message_sent')
-            ${shopClause}
-            AND timestamp >= '${phFrom}'
-            AND timestamp <= '${phTo}'
-          ORDER BY timestamp ASC
-          LIMIT 50000
-        `);
-
-        const widgetEntries: { shopId: string; unixTs: number; url: string; mode: string | null }[] = [];
-        for (const row of widgetResult.results) {
-          const sid = row[0] as string;
-          const unixTs = parseInt(row[1] as string, 10);
-          const url = (row[2] as string) || "";
-          const mode = (row[3] as string) || null;
-          if (sid) widgetEntries.push({ shopId: sid, unixTs, url, mode });
-        }
-
-        for (const conv of conversations) {
-          if (!conv.startedAt) continue;
-          const convUnix = Math.floor(new Date(conv.startedAt).getTime() / 1000);
-
-          // Match against session_started events (±300s window)
-          let bestMatch: { url: string; deviceType: string | null; mode: string | null; diff: number } | null = null;
-          for (const entry of phEntries) {
-            if (entry.shopId !== conv.shopId) continue;
-            const diff = Math.abs(entry.unixTs - convUnix);
-            if (diff <= 300 && (!bestMatch || diff < bestMatch.diff)) {
-              bestMatch = { url: entry.url, deviceType: entry.deviceType, mode: entry.mode, diff };
-            }
-          }
-
-          if (bestMatch) {
-            if (bestMatch.url) conv.sourcePage = classifyUrl(bestMatch.url);
-            if (!conv.device && bestMatch.deviceType) {
-              conv.device = bestMatch.deviceType.toLowerCase();
-            }
-            if (!conv.mode && bestMatch.mode) {
-              conv.mode = bestMatch.mode.toLowerCase();
-            }
-            if (!conv.mode && bestMatch.url) {
-              conv.mode = /\/products\//i.test(bestMatch.url) ? "product" : "search";
-            }
-          }
-
-          // If mode still missing, check widget/message events for a mode property
-          if (!conv.mode) {
-            let bestWidget: { url: string; mode: string | null; diff: number } | null = null;
-            for (const entry of widgetEntries) {
-              if (entry.shopId !== conv.shopId) continue;
-              const diff = entry.unixTs - convUnix;
-              if (diff >= -30 && diff <= 600 && (!bestWidget || diff < bestWidget.diff)) {
-                bestWidget = { url: entry.url, mode: entry.mode, diff };
-              }
-            }
-            if (bestWidget?.mode) {
-              conv.mode = bestWidget.mode.toLowerCase();
-            } else if (bestWidget?.url) {
-              conv.mode = /\/products\//i.test(bestWidget.url) ? "product" : "search";
-            }
-          }
-        }
+        const phTo = utcToParis(
+          dateTo
+            ? new Date(dateTo.length === 10 ? `${dateTo}T23:59:59Z` : dateTo)
+            : new Date("2099-12-31"),
+        );
+        const phRows = await fetchJustAiRowsByConversationIds(
+          conversations.map((c) => c.conversationId),
+          shopFilter,
+          phFrom,
+          phTo,
+        );
+        applyPostHogRowsToConversations(conversations, phRows);
       } catch (err) {
-        console.error("[conversations] Failed to resolve PostHog enrichment:", err);
+        console.error(
+          "[conversations] Failed to resolve PostHog enrichment:",
+          err,
+        );
       }
     }
 

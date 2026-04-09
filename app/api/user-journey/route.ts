@@ -67,44 +67,35 @@ function extractDetails(event: string, dataJson: string): string {
   }
 }
 
-function generateSummary(
-  steps: TimelineStep[],
-  durationSec: number
-): string {
+function generateSummary(steps: TimelineStep[], durationSec: number): string {
   const parts: string[] = [];
 
-  const hasShortcut = steps.find(
-    (s) => s.event === "just_ai_shortcut_clicked"
-  );
-  const products = steps.filter(
-    (s) => s.event === "just_ai_product_focused"
-  );
+  const hasShortcut = steps.find((s) => s.event === "just_ai_shortcut_clicked");
+  const products = steps.filter((s) => s.event === "just_ai_product_focused");
   const recos = steps.filter(
-    (s) => s.event === "just_ai_recommendation_clicked"
+    (s) => s.event === "just_ai_recommendation_clicked",
   );
-  const msgsSent = steps.filter(
-    (s) => s.event === "just_ai_message_sent"
-  );
+  const msgsSent = steps.filter((s) => s.event === "just_ai_message_sent");
   const msgsReceived = steps.filter(
-    (s) => s.event === "just_ai_message_received"
+    (s) => s.event === "just_ai_message_received",
   );
   const buyClicked = steps.some((s) => s.event === "just_ai_buy_clicked");
   const justRedirect = steps.some(
-    (s) => s.event === "just_ai_checkout_redirected"
+    (s) => s.event === "just_ai_checkout_redirected",
   );
   const shopifyStarted = steps.some(
-    (s) => s.event === "shopify_checkout_started"
+    (s) => s.event === "shopify_checkout_started",
   );
   const shopifyCompleted = steps.some(
-    (s) => s.event === "shopify_checkout_completed"
+    (s) => s.event === "shopify_checkout_completed",
   );
   const justCompleted = steps.some(
-    (s) => s.event === "just_checkout_completed"
+    (s) => s.event === "just_checkout_completed",
   );
 
   if (hasShortcut) {
     parts.push(
-      `User opened Ralph via the "${hasShortcut.details.replace(/"/g, "").split("(")[0].trim()}" shortcut`
+      `User opened Ralph via the "${hasShortcut.details.replace(/"/g, "").split("(")[0].trim()}" shortcut`,
     );
   } else {
     parts.push("User opened Ralph");
@@ -113,7 +104,7 @@ function generateSummary(
   const exchanges = Math.min(msgsSent.length, msgsReceived.length);
   if (exchanges > 0) {
     parts.push(
-      `had ${exchanges} exchange${exchanges > 1 ? "s" : ""} with Ralph`
+      `had ${exchanges} exchange${exchanges > 1 ? "s" : ""} with Ralph`,
     );
   }
 
@@ -121,14 +112,14 @@ function generateSummary(
     const handles = products.map((p) => p.details).filter(Boolean);
     if (handles.length > 0) {
       parts.push(
-        `browsed ${handles.length === 1 ? `product "${handles[0]}"` : `${handles.length} products`}`
+        `browsed ${handles.length === 1 ? `product "${handles[0]}"` : `${handles.length} products`}`,
       );
     }
   }
 
   if (recos.length > 0) {
     parts.push(
-      `clicked ${recos.length} recommendation${recos.length > 1 ? "s" : ""}`
+      `clicked ${recos.length} recommendation${recos.length > 1 ? "s" : ""}`,
     );
   }
 
@@ -167,7 +158,7 @@ function generateSummary(
  */
 async function resolveDistinctId(
   shopId: string,
-  startedAt: string
+  startedAt: string,
 ): Promise<string | null> {
   const ts = new Date(startedAt);
   // PostHog interprets bare datetime strings as Europe/Paris (project tz).
@@ -180,9 +171,7 @@ async function resolveDistinctId(
   // Convert UTC dates to Paris-local strings for PostHog.
   // Europe/Paris is UTC+1 (winter) or UTC+2 (summer).
   const toParis = (d: Date) =>
-    d
-      .toLocaleString("sv-SE", { timeZone: "Europe/Paris" })
-      .replace("T", " ");
+    d.toLocaleString("sv-SE", { timeZone: "Europe/Paris" }).replace("T", " ");
 
   const beforeStr = toParis(beforeDate);
   const afterStr = toParis(afterDate);
@@ -214,64 +203,114 @@ async function resolveDistinctId(
   return best?.did ?? null;
 }
 
+const JOURNEY_EVENTS_FILTER = `(startsWith(event, 'just_ai_')
+        OR event = 'just_pay_button_clicked'
+        OR event IN (
+          'shopify_checkout_started', 'shopify_checkout_completed',
+          'just_checkout_started', 'just_checkout_completed'
+        ))`;
+
+function hogqlQuote(val: string): string {
+  return `'${val.replace(/'/g, "\\'")}'`;
+}
+
+function stepsFromPostHogRows(results: unknown[][]): TimelineStep[] {
+  const steps: TimelineStep[] = [];
+  for (const row of results) {
+    const event = row[0] as string;
+    const timestamp = row[1] as string;
+    const dataJson = row[2] as string;
+    steps.push({
+      time: timestamp,
+      event,
+      details: extractDetails(event, dataJson),
+    });
+  }
+  return steps;
+}
+
+async function fetchDistinctIdForConversation(
+  conversationId: string,
+): Promise<string | null> {
+  const result = await queryPostHog(`
+    SELECT distinct_id
+    FROM events
+    WHERE event = 'just_ai_session_started'
+      AND JSONExtractString(properties, 'conversationId') = ${hogqlQuote(conversationId)}
+    ORDER BY timestamp ASC
+    LIMIT 1
+  `);
+  const did = result.results[0]?.[0] as string | undefined;
+  return did ?? null;
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
 
+    const conversationId = searchParams.get("conversationId") ?? "";
     const distinctIdParam = searchParams.get("distinctId");
     const shopId = searchParams.get("shopId") ?? "";
     const startedAt = searchParams.get("startedAt") ?? "";
     const dateFrom = searchParams.get("dateFrom") ?? "2024-01-01";
     const dateTo = searchParams.get("dateTo") ?? "2099-12-31";
 
-    let distinctId = distinctIdParam ?? "";
+    const dateFromQ = hogqlQuote(dateFrom);
+    const dateToQ = hogqlQuote(dateTo);
 
-    if (!distinctId && shopId && startedAt) {
-      distinctId = (await resolveDistinctId(shopId, startedAt)) ?? "";
-    }
+    let steps: TimelineStep[] = [];
+    let resolvedDistinctId: string | undefined;
 
-    if (!distinctId) {
-      return NextResponse.json({
-        summary: "Could not resolve user identity.",
-        timeline: [],
-        totalEvents: 0,
-        resolved: false,
-      });
-    }
-
-    const result = await queryPostHog(`
+    if (conversationId) {
+      const byConv = await queryPostHog(`
       SELECT
         event,
         timestamp,
         JSONExtractString(properties, 'data') AS data_json
       FROM events
-      WHERE distinct_id = '${distinctId.replace(/'/g, "\\'")}'
-        AND (
-          event LIKE 'just_ai_%'
-          OR event = 'just_pay_button_clicked'
-          OR event IN (
-            'shopify_checkout_started', 'shopify_checkout_completed',
-            'just_checkout_started', 'just_checkout_completed'
-          )
-        )
-        AND timestamp >= '${dateFrom}'
-        AND timestamp <= '${dateTo}'
+      WHERE JSONExtractString(properties, 'conversationId') = ${hogqlQuote(conversationId)}
+        AND ${JOURNEY_EVENTS_FILTER}
+        AND timestamp >= ${dateFromQ}
+        AND timestamp <= ${dateToQ}
+      ORDER BY timestamp ASC
+      LIMIT 500
+    `);
+      steps = stepsFromPostHogRows(byConv.results);
+      resolvedDistinctId =
+        (await fetchDistinctIdForConversation(conversationId)) ?? undefined;
+    } else {
+      let distinctId = distinctIdParam ?? "";
+
+      if (!distinctId && shopId && startedAt) {
+        distinctId = (await resolveDistinctId(shopId, startedAt)) ?? "";
+      }
+
+      if (!distinctId) {
+        return NextResponse.json({
+          summary: "Could not resolve user identity.",
+          timeline: [],
+          totalEvents: 0,
+          resolved: false,
+        });
+      }
+
+      resolvedDistinctId = distinctId;
+
+      const result = await queryPostHog(`
+      SELECT
+        event,
+        timestamp,
+        JSONExtractString(properties, 'data') AS data_json
+      FROM events
+      WHERE distinct_id = ${hogqlQuote(distinctId)}
+        AND ${JOURNEY_EVENTS_FILTER}
+        AND timestamp >= ${dateFromQ}
+        AND timestamp <= ${dateToQ}
       ORDER BY timestamp ASC
       LIMIT 500
     `);
 
-    const steps: TimelineStep[] = [];
-
-    for (const row of result.results) {
-      const event = row[0] as string;
-      const timestamp = row[1] as string;
-      const dataJson = row[2] as string;
-
-      steps.push({
-        time: timestamp,
-        event,
-        details: extractDetails(event, dataJson),
-      });
+      steps = stepsFromPostHogRows(result.results);
     }
 
     let durationSec = 0;
@@ -300,7 +339,7 @@ export async function GET(request: Request) {
       timeline,
       totalEvents: steps.length,
       resolved: true,
-      resolvedDistinctId: distinctId,
+      resolvedDistinctId,
     });
   } catch (err) {
     console.error("[API /user-journey]", err);
