@@ -28,9 +28,11 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
+  Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   ExternalLink,
   Keyboard,
   ListOrdered,
@@ -38,6 +40,7 @@ import {
   MousePointerClick,
   Zap,
 } from "lucide-react";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import {
   ConversationFeedbackTableCell,
   MessageFeedbackDetail,
@@ -708,6 +711,12 @@ export default function ConversationsPage() {
   const [hideEmpty, setHideEmpty] = useState(true);
   const [tablePage, setTablePage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const closingFromUiRef = useRef(false);
+  const [copiedConversationId, setCopiedConversationId] = useState(false);
+
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   // Enrichment state
   const [enrichments, setEnrichments] = useState<
@@ -893,11 +902,55 @@ export default function ConversationsPage() {
     );
   }, [allConversations, expandedId]);
 
+  const closeExpandedConversation = useCallback(() => {
+    closingFromUiRef.current = true;
+    setExpandedId(null);
+  }, []);
+
   useEffect(() => {
-    if (expandedId && !activeConversation) {
-      setExpandedId(null);
+    if (loading) return;
+
+    const cur = (searchParams.get("conversationId") ?? "").trim();
+
+    if (expandedId) {
+      const exists = allConversations.some(
+        (c) => c.conversationId === expandedId,
+      );
+      if (!exists) {
+        setExpandedId(null);
+        return;
+      }
+      if (cur !== expandedId) {
+        const p = new URLSearchParams(searchParams.toString());
+        p.set("conversationId", expandedId);
+        router.replace(`${pathname}?${p.toString()}`, { scroll: false });
+      }
+      return;
     }
-  }, [expandedId, activeConversation]);
+
+    if (!cur) {
+      return;
+    }
+
+    if (closingFromUiRef.current) {
+      const p = new URLSearchParams(searchParams.toString());
+      p.delete("conversationId");
+      const q = p.toString();
+      router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+      closingFromUiRef.current = false;
+      return;
+    }
+
+    if (allConversations.some((c) => c.conversationId === cur)) {
+      setExpandedId(cur);
+      return;
+    }
+
+    const p = new URLSearchParams(searchParams.toString());
+    p.delete("conversationId");
+    const q = p.toString();
+    router.replace(q ? `${pathname}?${q}` : pathname, { scroll: false });
+  }, [expandedId, loading, allConversations, searchParams, pathname, router]);
 
   const pagedConversationsRef = useRef<ConvWithShop[]>(pagedConversations);
   pagedConversationsRef.current = pagedConversations;
@@ -1001,6 +1054,7 @@ export default function ConversationsPage() {
   const toggleExpand = useCallback(
     (conv: ConvWithShop) => {
       if (expandedId === conv.conversationId) {
+        closingFromUiRef.current = true;
         setExpandedId(null);
       } else {
         setExpandedId(conv.conversationId);
@@ -1008,6 +1062,23 @@ export default function ConversationsPage() {
     },
     [expandedId],
   );
+
+  const copyActiveConversationId = useCallback(() => {
+    if (!activeConversation) return;
+    void navigator.clipboard
+      .writeText(activeConversation.conversationId)
+      .then(() => {
+        setCopiedConversationId(true);
+        window.setTimeout(() => setCopiedConversationId(false), 2000);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, [activeConversation]);
+
+  useEffect(() => {
+    setCopiedConversationId(false);
+  }, [activeConversation?.conversationId]);
 
   const handleJourneyRetry = useCallback(
     async (conversationId: string) => {
@@ -1354,30 +1425,55 @@ export default function ConversationsPage() {
       <div className="md:hidden">
         {activeConversation ? (
           <div className="flex flex-col overflow-hidden rounded-md border bg-card">
-            <div className="flex shrink-0 items-center gap-1 border-b bg-background/95 py-1.5 pl-1 pr-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+            <div className="flex shrink-0 flex-col gap-2 border-b bg-background/95 py-2 pl-1 pr-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="shrink-0"
+                  onClick={closeExpandedConversation}
+                  aria-label="Back to conversations"
+                >
+                  <ChevronLeft className="h-5 w-5" aria-hidden />
+                </Button>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-semibold leading-tight">
+                    {activeConversation.shopName}
+                  </p>
+                  <p className="truncate font-mono text-[11px] text-muted-foreground">
+                    {activeConversation.conversationId}
+                  </p>
+                </div>
+                {enrichments[activeConversation.conversationId]
+                  ?.hasCheckout && (
+                  <CheckoutBadge
+                    enrichment={enrichments[activeConversation.conversationId]}
+                  />
+                )}
+              </div>
               <Button
                 type="button"
-                variant="ghost"
-                size="icon"
-                className="shrink-0"
-                onClick={() => setExpandedId(null)}
-                aria-label="Back to conversations"
+                variant="secondary"
+                size="sm"
+                className="mx-2 inline-flex w-full max-w-full shrink-0 items-center justify-center font-medium"
+                onClick={copyActiveConversationId}
               >
-                <ChevronLeft className="h-5 w-5" aria-hidden />
+                {copiedConversationId ? (
+                  <>
+                    <Check
+                      className="mr-2 h-4 w-4 shrink-0 text-emerald-600"
+                      aria-hidden
+                    />
+                    Copied
+                  </>
+                ) : (
+                  <>
+                    <Copy className="mr-2 h-4 w-4 shrink-0" aria-hidden />
+                    Copy conversation ID
+                  </>
+                )}
               </Button>
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold leading-tight">
-                  {activeConversation.shopName}
-                </p>
-                <p className="truncate font-mono text-[11px] text-muted-foreground">
-                  {activeConversation.conversationId}
-                </p>
-              </div>
-              {enrichments[activeConversation.conversationId]?.hasCheckout && (
-                <CheckoutBadge
-                  enrichment={enrichments[activeConversation.conversationId]}
-                />
-              )}
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               <ConversationDetailPanel
