@@ -40,6 +40,25 @@ function emptyParsed(): ParsedMessage {
   };
 }
 
+/** Collapse whitespace so we can detect duplicate prose before/inside JSON. */
+function normalizeForDedup(s: string): string {
+  return s.replace(/\r\n/g, "\n").replace(/\s+/g, " ").trim();
+}
+
+/**
+ * Assistant payloads often repeat the same reply as prose before a fenced JSON
+ * block and again in `message` / `content`. Concatenating both duplicates the UI;
+ * when normalized text matches, keep the preamble (usually preserves line breaks).
+ */
+function mergePreambleWithInner(preamble: string, innerText: string): string {
+  const pre = preamble.trim();
+  const inner = innerText.trim();
+  if (!pre) return inner;
+  if (!inner) return pre;
+  if (normalizeForDedup(pre) === normalizeForDedup(inner)) return pre;
+  return `${pre}\n\n${inner}`.trim();
+}
+
 function extractFencedJson(
   s: string,
 ): { before: string; json: Record<string, unknown> } | null {
@@ -180,7 +199,7 @@ function parsedFromAssistantJson(
         const pre = fencedInner.before.trim();
         return {
           ...inner,
-          text: pre ? `${pre}\n\n${inner.text}`.trim() : inner.text,
+          text: mergePreambleWithInner(pre, inner.text),
         };
       }
     }
@@ -213,7 +232,7 @@ function tryExtractWithPreamble(val: unknown): ParsedMessage | null {
   if (!payload) return null;
   const preamble = fenced.before.trim();
   if (preamble) {
-    return { ...payload, text: `${preamble}\n\n${payload.text}`.trim() };
+    return { ...payload, text: mergePreambleWithInner(preamble, payload.text) };
   }
   return payload;
 }
