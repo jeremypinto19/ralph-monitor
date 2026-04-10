@@ -57,6 +57,7 @@ import type {
 } from "@/lib/checkout-filters";
 import { checkoutEventMatchesFilters } from "@/lib/checkout-filters";
 import type { ConversationSourceModeFilter } from "@/lib/conversation-source-mode";
+import { cn } from "@/lib/utils";
 
 /** Client-side filter on assistant message votes (no API change). */
 type ConversationFeedbackFilter = "all" | "up" | "down" | "none";
@@ -429,6 +430,262 @@ function AttributionDetail({
   );
 }
 
+function conversationMailPreview(c: ConvWithShop): string {
+  const ev =
+    c.events.find((e) => e.eventType === "user_message") ??
+    c.events.find(
+      (e) =>
+        e.eventType === "user_message" || e.eventType === "assistant_message",
+    );
+  if (!ev) return "";
+  const t = extractPlainText((ev.data ?? {}) as Record<string, unknown>).trim();
+  if (!t) return "";
+  return t.length > 120 ? `${t.slice(0, 117)}…` : t;
+}
+
+function ConversationDetailPanel({
+  c,
+  enrichment,
+  journeys,
+  journeysBulkLoading,
+  journeyRetryingId,
+  onJourneyRetry,
+  showMetaHeading = true,
+  className,
+}: {
+  c: ConvWithShop;
+  enrichment: ConversationEnrichment | undefined;
+  journeys: Record<string, UserJourney | null>;
+  journeysBulkLoading: boolean;
+  journeyRetryingId: string | null;
+  onJourneyRetry: (conversationId: string) => void;
+  showMetaHeading?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className={cn("border-t bg-muted/20 px-4 py-4 sm:px-6", className)}>
+      {showMetaHeading && (
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-sm font-semibold">Conversation</span>
+          <span className="font-mono text-xs text-muted-foreground">
+            {c.conversationId}
+          </span>
+          {enrichment?.hasCheckout && <CheckoutBadge enrichment={enrichment} />}
+        </div>
+      )}
+      <Tabs defaultValue="chat" className="w-full">
+        <TabsList className="grid w-full max-w-md grid-cols-3">
+          <TabsTrigger value="chat">Chat</TabsTrigger>
+          <TabsTrigger value="journey">User Journey</TabsTrigger>
+          <TabsTrigger value="attribution">Attribution</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="chat">
+          <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-4">
+            {c.events
+              .filter(
+                (e) =>
+                  e.eventType === "user_message" ||
+                  e.eventType === "assistant_message",
+              )
+              .map((e, i) => {
+                const isUser = e.eventType === "user_message";
+                const parsed = parseMessage(
+                  (e.data ?? {}) as Record<string, unknown>,
+                );
+                const displayText = parsed.text || JSON.stringify(e.data);
+                const messageModeFromData = String(
+                  (e.data as Record<string, unknown>).mode ?? "",
+                ).trim();
+                const messageModeLabel = messageModeFromData || (c.mode ?? "");
+                const showRalphPayload =
+                  !isUser &&
+                  (parsed.recommendations.length > 0 ||
+                    parsed.links.length > 0 ||
+                    parsed.questions.length > 0 ||
+                    parsed.action != null);
+                return (
+                  <div
+                    key={i}
+                    className={`rounded-lg p-3 text-sm ${
+                      isUser
+                        ? "ml-8 bg-primary text-primary-foreground"
+                        : "mr-8 bg-muted"
+                    }`}
+                  >
+                    <div className="mb-1 flex flex-wrap items-center gap-2 text-xs opacity-70">
+                      <span>
+                        {isUser ? "User" : "Ralph"} &middot;{" "}
+                        {format(new Date(e.createdAt), "HH:mm:ss")}
+                      </span>
+                      {isUser && messageModeLabel && (
+                        <Badge
+                          variant="secondary"
+                          className="h-5 px-1.5 text-[10px] font-normal capitalize opacity-90"
+                        >
+                          {messageModeLabel}
+                        </Badge>
+                      )}
+                      {!isUser && parsed.lang && (
+                        <Badge
+                          variant="outline"
+                          className="h-5 px-1.5 text-[10px] font-normal opacity-90"
+                        >
+                          {parsed.lang}
+                        </Badge>
+                      )}
+                    </div>
+                    <div className="whitespace-pre-wrap break-words">
+                      {displayText}
+                    </div>
+                    {showRalphPayload && (
+                      <div className="mt-2 space-y-3 border-t border-border/30 pt-2">
+                        {parsed.recommendations.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <Zap className="h-3 w-3" />
+                              Recommendations
+                            </div>
+                            {parsed.recommendations.map((rec, ri) => (
+                              <div
+                                key={ri}
+                                className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
+                              >
+                                <span className="font-medium">{rec.title}</span>
+                                {rec.price && (
+                                  <span className="text-muted-foreground">
+                                    {rec.price}
+                                  </span>
+                                )}
+                                {rec.compareAtPrice && (
+                                  <span className="text-muted-foreground line-through">
+                                    {rec.compareAtPrice}
+                                  </span>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {parsed.links.length > 0 && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <ExternalLink className="h-3 w-3" />
+                              Links
+                            </div>
+                            <ul className="list-none space-y-1 pl-0">
+                              {parsed.links.map((link, li) => (
+                                <li key={li}>
+                                  <a
+                                    href={link.url}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                                  >
+                                    <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+                                    {link.label || link.url}
+                                  </a>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                        {parsed.questions.length > 0 && (
+                          <div className="space-y-2">
+                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <ListOrdered className="h-3 w-3" />
+                              Questions
+                            </div>
+                            {parsed.questions.map((q, qi) => (
+                              <div
+                                key={qi}
+                                className="rounded-md border border-border/40 bg-background/40 px-2 py-1.5"
+                              >
+                                {q.prompt && (
+                                  <p className="text-xs font-medium">
+                                    {q.prompt}
+                                  </p>
+                                )}
+                                {q.options.length > 0 && (
+                                  <div className="mt-1.5 flex flex-wrap gap-1">
+                                    {q.options.map((opt, oi) => (
+                                      <Badge
+                                        key={oi}
+                                        variant="secondary"
+                                        className="text-[10px] font-normal"
+                                      >
+                                        {opt}
+                                      </Badge>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {parsed.action && (
+                          <div className="space-y-1">
+                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                              <MousePointerClick className="h-3 w-3" />
+                              Action
+                            </div>
+                            <div className="space-y-0.5 rounded-md border border-border/40 bg-background/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed">
+                              {Object.entries(parsed.action).map(([k, v]) => (
+                                <div key={k}>
+                                  <span className="text-muted-foreground">
+                                    {k}:
+                                  </span>{" "}
+                                  {typeof v === "object" && v !== null
+                                    ? JSON.stringify(v)
+                                    : String(v)}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                    {!isUser && e.feedback ? (
+                      <MessageFeedbackDetail feedback={e.feedback} />
+                    ) : null}
+                  </div>
+                );
+              })}
+            {c.events.filter(
+              (e) =>
+                e.eventType === "user_message" ||
+                e.eventType === "assistant_message",
+            ).length === 0 && (
+              <div className="py-8 text-center text-sm text-muted-foreground">
+                No messages in this conversation.
+              </div>
+            )}
+          </div>
+        </TabsContent>
+
+        <TabsContent value="journey">
+          <div className="max-h-[60vh] overflow-y-auto pr-4">
+            <JourneyTimeline
+              journey={journeys[c.conversationId]}
+              loading={
+                journeysBulkLoading && journeys[c.conversationId] === undefined
+              }
+              conversationId={c.conversationId}
+              onRetry={onJourneyRetry}
+              retryLoading={journeyRetryingId === c.conversationId}
+            />
+          </div>
+        </TabsContent>
+
+        <TabsContent value="attribution">
+          <div className="max-h-[60vh] overflow-y-auto pr-4">
+            <AttributionDetail enrichment={enrichment} />
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
+  );
+}
+
 export default function ConversationsPage() {
   const [groups, setGroups] = useState<AiConversationShopGroup[]>([]);
   const [loading, setLoading] = useState(true);
@@ -628,6 +885,19 @@ export default function ConversationsPage() {
     const start = conversationPage * CONVERSATIONS_PAGE_SIZE;
     return allConversations.slice(start, start + CONVERSATIONS_PAGE_SIZE);
   }, [allConversations, conversationPage]);
+
+  const activeConversation = useMemo((): ConvWithShop | null => {
+    if (!expandedId) return null;
+    return (
+      allConversations.find((c) => c.conversationId === expandedId) ?? null
+    );
+  }, [allConversations, expandedId]);
+
+  useEffect(() => {
+    if (expandedId && !activeConversation) {
+      setExpandedId(null);
+    }
+  }, [expandedId, activeConversation]);
 
   const pagedConversationsRef = useRef<ConvWithShop[]>(pagedConversations);
   pagedConversationsRef.current = pagedConversations;
@@ -1080,7 +1350,178 @@ export default function ConversationsPage() {
         )}
       </div>
 
-      <div className="min-w-0 overflow-x-auto rounded-md border">
+      {/* Mobile: mail-style list → full-width detail (md+ keeps table below) */}
+      <div className="md:hidden">
+        {activeConversation ? (
+          <div className="flex flex-col overflow-hidden rounded-md border bg-card">
+            <div className="flex shrink-0 items-center gap-1 border-b bg-background/95 py-1.5 pl-1 pr-3 backdrop-blur supports-[backdrop-filter]:bg-background/80">
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="shrink-0"
+                onClick={() => setExpandedId(null)}
+                aria-label="Back to conversations"
+              >
+                <ChevronLeft className="h-5 w-5" aria-hidden />
+              </Button>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold leading-tight">
+                  {activeConversation.shopName}
+                </p>
+                <p className="truncate font-mono text-[11px] text-muted-foreground">
+                  {activeConversation.conversationId}
+                </p>
+              </div>
+              {enrichments[activeConversation.conversationId]?.hasCheckout && (
+                <CheckoutBadge
+                  enrichment={enrichments[activeConversation.conversationId]}
+                />
+              )}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+              <ConversationDetailPanel
+                c={activeConversation}
+                enrichment={enrichments[activeConversation.conversationId]}
+                journeys={journeys}
+                journeysBulkLoading={journeysBulkLoading}
+                journeyRetryingId={journeyRetryingId}
+                onJourneyRetry={handleJourneyRetry}
+                showMetaHeading={false}
+                className="border-0 bg-transparent px-3 py-3 sm:px-4"
+              />
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="overflow-hidden rounded-md border bg-card">
+              {loading &&
+                Array.from({ length: 6 }).map((_, i) => (
+                  <div
+                    key={`m-sk-${i}`}
+                    className="border-b px-3 py-3 last:border-b-0"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0 flex-1 space-y-2">
+                        <Skeleton className="h-4 w-40" />
+                        <Skeleton className="h-3 w-56" />
+                        <Skeleton className="h-3 w-full max-w-[280px]" />
+                      </div>
+                      <Skeleton className="h-4 w-4 shrink-0 rounded" />
+                    </div>
+                  </div>
+                ))}
+              {!loading &&
+                pagedConversations.map((c) => {
+                  const enrichment = enrichments[c.conversationId];
+                  const preview = conversationMailPreview(c);
+                  return (
+                    <button
+                      key={c.conversationId}
+                      type="button"
+                      className="flex w-full items-start gap-3 border-b px-3 py-3 text-left last:border-b-0 hover:bg-muted/50 active:bg-muted/80"
+                      onClick={() => setExpandedId(c.conversationId)}
+                    >
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline justify-between gap-2">
+                          <span className="truncate font-medium">
+                            {c.shopName}
+                          </span>
+                          <span className="shrink-0 text-xs text-muted-foreground">
+                            {c.startedAt
+                              ? format(new Date(c.startedAt), "MMM d, HH:mm")
+                              : "—"}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {c.messageCount}{" "}
+                          {c.messageCount === 1 ? "message" : "messages"}
+                          {c.device ? (
+                            <>
+                              {" "}
+                              · <span className="capitalize">{c.device}</span>
+                            </>
+                          ) : null}
+                        </p>
+                        {preview ? (
+                          <p className="mt-1 line-clamp-2 text-[13px] leading-snug text-muted-foreground">
+                            {preview}
+                          </p>
+                        ) : null}
+                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                          {c.mode ? (
+                            <Badge
+                              variant="secondary"
+                              className="h-5 px-1.5 text-[10px] font-normal capitalize"
+                            >
+                              {c.mode}
+                            </Badge>
+                          ) : null}
+                          <LaunchIndicator source={c.launchSource} />
+                          <ConversationFeedbackTableCell events={c.events} />
+                          <CheckoutBadge enrichment={enrichment} />
+                        </div>
+                      </div>
+                      <ChevronRight
+                        className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground"
+                        aria-hidden
+                      />
+                    </button>
+                  );
+                })}
+              {allConversations.length === 0 && !loading && (
+                <div className="px-3 py-10 text-center text-sm text-muted-foreground">
+                  No conversations match your filters.
+                </div>
+              )}
+            </div>
+            {!loading && allConversations.length > 0 && (
+              <div className="mt-3 flex flex-col gap-3 rounded-md border bg-card px-4 py-3 text-sm text-muted-foreground">
+                <span>
+                  Page {conversationPage + 1} of {conversationPageCount}
+                  {" · "}
+                  Showing {conversationPage * CONVERSATIONS_PAGE_SIZE + 1}–
+                  {Math.min(
+                    (conversationPage + 1) * CONVERSATIONS_PAGE_SIZE,
+                    allConversations.length,
+                  )}{" "}
+                  of {allConversations.length}
+                </span>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={conversationPage <= 0}
+                    onClick={() => setTablePage((p) => Math.max(0, p - 1))}
+                    aria-label="Previous page"
+                  >
+                    <ChevronLeft className="h-4 w-4" aria-hidden />
+                    Previous
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={conversationPage >= conversationPageCount - 1}
+                    onClick={() =>
+                      setTablePage((p) =>
+                        Math.min(conversationPageCount - 1, p + 1),
+                      )
+                    }
+                    aria-label="Next page"
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" aria-hidden />
+                  </Button>
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      <div className="hidden min-w-0 overflow-x-auto rounded-md border md:block">
         <Table>
           <TableHeader>
             <TableRow>
@@ -1205,264 +1646,14 @@ export default function ConversationsPage() {
                     {isExpanded && (
                       <TableRow>
                         <TableCell colSpan={12} className="p-0">
-                          <div className="border-t bg-muted/20 px-6 py-4">
-                            <div className="mb-3 flex items-center gap-2">
-                              <span className="text-sm font-semibold">
-                                Conversation
-                              </span>
-                              <span className="font-mono text-xs text-muted-foreground">
-                                {c.conversationId}
-                              </span>
-                              {enrichment?.hasCheckout && (
-                                <CheckoutBadge enrichment={enrichment} />
-                              )}
-                            </div>
-                            <Tabs defaultValue="chat" className="w-full">
-                              <TabsList className="grid w-full max-w-md grid-cols-3">
-                                <TabsTrigger value="chat">Chat</TabsTrigger>
-                                <TabsTrigger value="journey">
-                                  User Journey
-                                </TabsTrigger>
-                                <TabsTrigger value="attribution">
-                                  Attribution
-                                </TabsTrigger>
-                              </TabsList>
-
-                              <TabsContent value="chat">
-                                <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-4">
-                                  {c.events
-                                    .filter(
-                                      (e) =>
-                                        e.eventType === "user_message" ||
-                                        e.eventType === "assistant_message",
-                                    )
-                                    .map((e, i) => {
-                                      const isUser =
-                                        e.eventType === "user_message";
-                                      const parsed = parseMessage(
-                                        (e.data ?? {}) as Record<
-                                          string,
-                                          unknown
-                                        >,
-                                      );
-                                      const displayText =
-                                        parsed.text || JSON.stringify(e.data);
-                                      const messageModeFromData = String(
-                                        (e.data as Record<string, unknown>)
-                                          .mode ?? "",
-                                      ).trim();
-                                      const messageModeLabel =
-                                        messageModeFromData || (c.mode ?? "");
-                                      const showRalphPayload =
-                                        !isUser &&
-                                        (parsed.recommendations.length > 0 ||
-                                          parsed.links.length > 0 ||
-                                          parsed.questions.length > 0 ||
-                                          parsed.action != null);
-                                      return (
-                                        <div
-                                          key={i}
-                                          className={`rounded-lg p-3 text-sm ${
-                                            isUser
-                                              ? "ml-8 bg-primary text-primary-foreground"
-                                              : "mr-8 bg-muted"
-                                          }`}
-                                        >
-                                          <div className="mb-1 flex flex-wrap items-center gap-2 text-xs opacity-70">
-                                            <span>
-                                              {isUser ? "User" : "Ralph"}{" "}
-                                              &middot;{" "}
-                                              {format(
-                                                new Date(e.createdAt),
-                                                "HH:mm:ss",
-                                              )}
-                                            </span>
-                                            {isUser && messageModeLabel && (
-                                              <Badge
-                                                variant="secondary"
-                                                className="h-5 px-1.5 text-[10px] font-normal capitalize opacity-90"
-                                              >
-                                                {messageModeLabel}
-                                              </Badge>
-                                            )}
-                                            {!isUser && parsed.lang && (
-                                              <Badge
-                                                variant="outline"
-                                                className="h-5 px-1.5 text-[10px] font-normal opacity-90"
-                                              >
-                                                {parsed.lang}
-                                              </Badge>
-                                            )}
-                                          </div>
-                                          <div className="whitespace-pre-wrap break-words">
-                                            {displayText}
-                                          </div>
-                                          {showRalphPayload && (
-                                            <div className="mt-2 space-y-3 border-t border-border/30 pt-2">
-                                              {parsed.recommendations.length >
-                                                0 && (
-                                                <div className="space-y-1">
-                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                                    <Zap className="h-3 w-3" />
-                                                    Recommendations
-                                                  </div>
-                                                  {parsed.recommendations.map(
-                                                    (rec, ri) => (
-                                                      <div
-                                                        key={ri}
-                                                        className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
-                                                      >
-                                                        <span className="font-medium">
-                                                          {rec.title}
-                                                        </span>
-                                                        {rec.price && (
-                                                          <span className="text-muted-foreground">
-                                                            {rec.price}
-                                                          </span>
-                                                        )}
-                                                        {rec.compareAtPrice && (
-                                                          <span className="text-muted-foreground line-through">
-                                                            {rec.compareAtPrice}
-                                                          </span>
-                                                        )}
-                                                      </div>
-                                                    ),
-                                                  )}
-                                                </div>
-                                              )}
-                                              {parsed.links.length > 0 && (
-                                                <div className="space-y-1">
-                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                                    <ExternalLink className="h-3 w-3" />
-                                                    Links
-                                                  </div>
-                                                  <ul className="list-none space-y-1 pl-0">
-                                                    {parsed.links.map(
-                                                      (link, li) => (
-                                                        <li key={li}>
-                                                          <a
-                                                            href={link.url}
-                                                            target="_blank"
-                                                            rel="noopener noreferrer"
-                                                            className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                                                          >
-                                                            <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
-                                                            {link.label ||
-                                                              link.url}
-                                                          </a>
-                                                        </li>
-                                                      ),
-                                                    )}
-                                                  </ul>
-                                                </div>
-                                              )}
-                                              {parsed.questions.length > 0 && (
-                                                <div className="space-y-2">
-                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                                    <ListOrdered className="h-3 w-3" />
-                                                    Questions
-                                                  </div>
-                                                  {parsed.questions.map(
-                                                    (q, qi) => (
-                                                      <div
-                                                        key={qi}
-                                                        className="rounded-md border border-border/40 bg-background/40 px-2 py-1.5"
-                                                      >
-                                                        {q.prompt && (
-                                                          <p className="text-xs font-medium">
-                                                            {q.prompt}
-                                                          </p>
-                                                        )}
-                                                        {q.options.length >
-                                                          0 && (
-                                                          <div className="mt-1.5 flex flex-wrap gap-1">
-                                                            {q.options.map(
-                                                              (opt, oi) => (
-                                                                <Badge
-                                                                  key={oi}
-                                                                  variant="secondary"
-                                                                  className="text-[10px] font-normal"
-                                                                >
-                                                                  {opt}
-                                                                </Badge>
-                                                              ),
-                                                            )}
-                                                          </div>
-                                                        )}
-                                                      </div>
-                                                    ),
-                                                  )}
-                                                </div>
-                                              )}
-                                              {parsed.action && (
-                                                <div className="space-y-1">
-                                                  <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                                    <MousePointerClick className="h-3 w-3" />
-                                                    Action
-                                                  </div>
-                                                  <div className="space-y-0.5 rounded-md border border-border/40 bg-background/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed">
-                                                    {Object.entries(
-                                                      parsed.action,
-                                                    ).map(([k, v]) => (
-                                                      <div key={k}>
-                                                        <span className="text-muted-foreground">
-                                                          {k}:
-                                                        </span>{" "}
-                                                        {typeof v ===
-                                                          "object" && v !== null
-                                                          ? JSON.stringify(v)
-                                                          : String(v)}
-                                                      </div>
-                                                    ))}
-                                                  </div>
-                                                </div>
-                                              )}
-                                            </div>
-                                          )}
-                                          {!isUser && e.feedback ? (
-                                            <MessageFeedbackDetail
-                                              feedback={e.feedback}
-                                            />
-                                          ) : null}
-                                        </div>
-                                      );
-                                    })}
-                                  {c.events.filter(
-                                    (e) =>
-                                      e.eventType === "user_message" ||
-                                      e.eventType === "assistant_message",
-                                  ).length === 0 && (
-                                    <div className="py-8 text-center text-sm text-muted-foreground">
-                                      No messages in this conversation.
-                                    </div>
-                                  )}
-                                </div>
-                              </TabsContent>
-
-                              <TabsContent value="journey">
-                                <div className="max-h-[60vh] overflow-y-auto pr-4">
-                                  <JourneyTimeline
-                                    journey={journeys[c.conversationId]}
-                                    loading={
-                                      journeysBulkLoading &&
-                                      journeys[c.conversationId] === undefined
-                                    }
-                                    conversationId={c.conversationId}
-                                    onRetry={handleJourneyRetry}
-                                    retryLoading={
-                                      journeyRetryingId === c.conversationId
-                                    }
-                                  />
-                                </div>
-                              </TabsContent>
-
-                              <TabsContent value="attribution">
-                                <div className="max-h-[60vh] overflow-y-auto pr-4">
-                                  <AttributionDetail enrichment={enrichment} />
-                                </div>
-                              </TabsContent>
-                            </Tabs>
-                          </div>
+                          <ConversationDetailPanel
+                            c={c}
+                            enrichment={enrichment}
+                            journeys={journeys}
+                            journeysBulkLoading={journeysBulkLoading}
+                            journeyRetryingId={journeyRetryingId}
+                            onJourneyRetry={handleJourneyRetry}
+                          />
                         </TableCell>
                       </TableRow>
                     )}
