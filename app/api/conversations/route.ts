@@ -1,12 +1,10 @@
 import { NextResponse } from "next/server";
-import { scanTable, resolveShopNames } from "@/lib/dynamo";
 import {
-  HOGQL_DATA_CONVERSATION_ID,
-  HOGQL_DATA_MODE,
-  JOURNEY_BATCH_QUERY_ROW_CAP,
-  JOURNEY_EVENTS_FILTER,
-} from "@/lib/conversation-posthog-bundle";
-import { queryPostHog } from "@/lib/posthog";
+  fetchUnifiedPosthogRowsByConversationIdsCached,
+  loadAiAgentConversationItems,
+  resolveShopNamesCached,
+  type PhJustAiRow,
+} from "@/lib/conversations-api-cache";
 import { setPosthogRowCache } from "@/lib/posthog-row-cache";
 import { parseSanitizedAssistantFeedback } from "@/lib/conversation-feedback";
 import type {
@@ -56,22 +54,6 @@ function utcToParis(d: Date): string {
     .replace("T", " ");
 }
 
-function hogqlQuote(val: string): string {
-  return `'${val.replace(/'/g, "\\'")}'`;
-}
-
-const POSTHOG_CONVERSATION_ID_BATCH = 100;
-
-interface PhJustAiRow {
-  conversationId: string;
-  event: string;
-  currentUrl: string;
-  deviceType: string | null;
-  mode: string | null;
-  tsUnix: number;
-  distinctId: string | null;
-}
-
 function deriveLaunchSource(rows: PhJustAiRow[]): ConversationLaunchSource {
   let minShortcut = Number.POSITIVE_INFINITY;
   let minMessage = Number.POSITIVE_INFINITY;
@@ -93,78 +75,6 @@ function deriveLaunchSource(rows: PhJustAiRow[]): ConversationLaunchSource {
     return "input";
   }
   return minShortcut <= minMessage ? "shortcut" : "input";
-}
-
-/** Same column order as handleBatchJourneys plus list-only fields (indices 5–8). */
-function rawUnifiedRowsToJustAiRows(rows: unknown[][]): PhJustAiRow[] {
-  const out: PhJustAiRow[] = [];
-  for (const row of rows) {
-    const ev = (row[1] as string) ?? "";
-    if (!ev.startsWith("just_ai_")) continue;
-    const cid = row[0] as string;
-    if (!cid) continue;
-    out.push({
-      conversationId: cid,
-      event: ev,
-      currentUrl: (row[5] as string) || "",
-      deviceType: (row[6] as string) || null,
-      mode: (row[7] as string) || null,
-      tsUnix: Number(row[8]) || 0,
-      distinctId: (row[4] as string) || null,
-    });
-  }
-  return out;
-}
-
-async function fetchUnifiedPosthogRowsByConversationIds(
-  conversationIds: string[],
-  shopFilter: string | null,
-  phFrom: string,
-  phTo: string,
-): Promise<{ justAiRows: PhJustAiRow[]; allRawRows: unknown[][] }> {
-  const ids = [...new Set(conversationIds.filter(Boolean))];
-  if (ids.length === 0) return { justAiRows: [], allRawRows: [] };
-
-  const shopClause = shopFilter
-    ? `AND JSONExtractString(properties, 'shopId') = ${hogqlQuote(shopFilter)}`
-    : "";
-
-  const allRawRows: unknown[][] = [];
-
-  for (let i = 0; i < ids.length; i += POSTHOG_CONVERSATION_ID_BATCH) {
-    const batch = ids.slice(i, i + POSTHOG_CONVERSATION_ID_BATCH);
-    const inList = batch.map(hogqlQuote).join(", ");
-
-    const result = await queryPostHog(`
-      SELECT
-        ${HOGQL_DATA_CONVERSATION_ID} AS conversation_id,
-        event,
-        timestamp,
-        JSONExtractString(properties, 'data') AS data_json,
-        distinct_id,
-        properties.\`$current_url\` AS current_url,
-        properties.\`$device_type\` AS device_type,
-        ${HOGQL_DATA_MODE} AS mode,
-        toUnixTimestamp(timestamp) AS ts_unix
-      FROM events
-      WHERE ${HOGQL_DATA_CONVERSATION_ID} IN (${inList})
-        AND ${JOURNEY_EVENTS_FILTER}
-        ${shopClause}
-        AND timestamp >= '${phFrom}'
-        AND timestamp <= '${phTo}'
-      ORDER BY conversation_id, timestamp ASC
-      LIMIT ${JOURNEY_BATCH_QUERY_ROW_CAP}
-    `);
-
-    for (const row of result.results) {
-      allRawRows.push(row);
-    }
-  }
-
-  return {
-    justAiRows: rawUnifiedRowsToJustAiRows(allRawRows),
-    allRawRows,
-  };
 }
 
 function applyPostHogRowsToConversations(
@@ -295,7 +205,7 @@ export async function GET(request: Request) {
     const modeFilter = searchParams.get("mode");
     const launchSourceFilter = searchParams.get("launchSource");
 
-    const items = await scanTable("AiAgentConversationsProd");
+    const items = await loadAiAgentConversationItems();
 
     const eventsByConvo = new Map<string, AiConversationEvent[]>();
     const convoShop = new Map<string, string>();
@@ -362,7 +272,7 @@ export async function GET(request: Request) {
     }
 
     const shopIds = [...new Set(conversations.map((c) => c.shopId))];
-    const shopNames = await resolveShopNames(shopIds);
+    const shopNames = await resolveShopNamesCached(shopIds);
 
     let posthogRowCacheToken: string | null = null;
 
@@ -376,7 +286,7 @@ export async function GET(request: Request) {
             : new Date("2099-12-31"),
         );
         const { justAiRows, allRawRows } =
-          await fetchUnifiedPosthogRowsByConversationIds(
+          await fetchUnifiedPosthogRowsByConversationIdsCached(
             conversations.map((c) => c.conversationId),
             shopFilter,
             phFrom,
