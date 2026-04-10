@@ -8,6 +8,7 @@ import {
 } from "@/lib/conversation-posthog-bundle";
 import { queryPostHog } from "@/lib/posthog";
 import { setPosthogRowCache } from "@/lib/posthog-row-cache";
+import { parseSanitizedAssistantFeedback } from "@/lib/conversation-feedback";
 import type {
   AiConversationEvent,
   AiConversation,
@@ -302,6 +303,10 @@ export async function GET(request: Request) {
 
     for (const item of items) {
       const cid = (item.conversationId as string) ?? "";
+      const feedback =
+        item.feedback != null
+          ? parseSanitizedAssistantFeedback(sanitize(item.feedback))
+          : undefined;
       const event: AiConversationEvent = {
         conversationId: cid,
         eventId: (item.eventId as string) ?? "",
@@ -310,6 +315,7 @@ export async function GET(request: Request) {
         shopId: (item.shopId as string) ?? "",
         sessionId: (item.sessionId as string) ?? null,
         data: sanitize(item.data ?? {}) as Record<string, unknown>,
+        ...(feedback ? { feedback } : {}),
       };
       if (!eventsByConvo.has(cid)) eventsByConvo.set(cid, []);
       eventsByConvo.get(cid)!.push(event);

@@ -1,5 +1,13 @@
 // TypeScript types mirroring Pydantic models from main.py
 
+/** User vote on an assistant reply; set via DynamoDB update on the event item. */
+export interface AssistantMessageFeedback {
+  vote: "up" | "down";
+  reasons?: string[];
+  freeformText?: string;
+  updatedAt: string;
+}
+
 export interface AiConversationEvent {
   conversationId: string;
   eventId: string;
@@ -8,6 +16,7 @@ export interface AiConversationEvent {
   shopId: string;
   sessionId?: string | null;
   data: Record<string, unknown>;
+  feedback?: AssistantMessageFeedback | null;
 }
 
 export type SourcePage = "homepage" | "product" | "collection" | "other" | null;

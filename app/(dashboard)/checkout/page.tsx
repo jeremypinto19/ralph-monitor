@@ -24,6 +24,7 @@ import {
   Package,
   Tag,
 } from "lucide-react";
+import { MessageFeedbackDetail } from "@/components/conversation-message-feedback";
 import type {
   CheckoutUserGroup,
   Attribution,
@@ -668,6 +669,11 @@ function ConversationSection({
                               ))}
                             </div>
                           )}
+                          {!isUser && msg.feedback ? (
+                            <div className="pl-7">
+                              <MessageFeedbackDetail feedback={msg.feedback} />
+                            </div>
+                          ) : null}
                         </div>
                       );
                     })}

@@ -43,6 +43,10 @@ import {
   MousePointerClick,
   Zap,
 } from "lucide-react";
+import {
+  ConversationFeedbackTableCell,
+  MessageFeedbackDetail,
+} from "@/components/conversation-message-feedback";
 import { Skeleton } from "@/components/ui/skeleton";
 import type {
   AiConversation,
@@ -51,6 +55,22 @@ import type {
   ConversationLaunchSource,
 } from "@/lib/types";
 import { parseMessage, extractPlainText } from "@/lib/message-utils";
+import { summarizeConversationFeedback } from "@/lib/conversation-feedback";
+
+/** Client-side filter on assistant message votes (no API change). */
+type ConversationFeedbackFilter = "all" | "up" | "down" | "none";
+
+function conversationMatchesFeedbackFilter(
+  c: AiConversation,
+  filter: ConversationFeedbackFilter,
+): boolean {
+  if (filter === "all") return true;
+  const { hasUp, hasDown } = summarizeConversationFeedback(c.events);
+  if (filter === "none") return !hasUp && !hasDown;
+  if (filter === "up") return hasUp;
+  if (filter === "down") return hasDown;
+  return true;
+}
 
 interface TimelineEvent {
   time: string;
@@ -452,6 +472,8 @@ export default function ConversationsPage() {
   const [launchSource, setLaunchSource] = useState<
     "all" | ConversationLaunchSource
   >("all");
+  const [feedbackFilter, setFeedbackFilter] =
+    useState<ConversationFeedbackFilter>("all");
   const [search, setSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(true);
   const [tablePage, setTablePage] = useState(0);
@@ -524,6 +546,12 @@ export default function ConversationsPage() {
       flat = flat.filter((c) => c.messageCount > 0);
     }
 
+    if (feedbackFilter !== "all") {
+      flat = flat.filter((c) =>
+        conversationMatchesFeedbackFilter(c, feedbackFilter),
+      );
+    }
+
     if (!search) return flat;
     const lower = search.toLowerCase();
     return flat.filter(
@@ -537,11 +565,20 @@ export default function ConversationsPage() {
           return msg.toLowerCase().includes(lower);
         }),
     );
-  }, [groups, search, hideEmpty]);
+  }, [groups, search, hideEmpty, feedbackFilter]);
 
   useEffect(() => {
     setTablePage(0);
-  }, [shop, dateFrom, dateTo, device, launchSource, search, hideEmpty]);
+  }, [
+    shop,
+    dateFrom,
+    dateTo,
+    device,
+    launchSource,
+    search,
+    hideEmpty,
+    feedbackFilter,
+  ]);
 
   useEffect(() => {
     const max = Math.max(
@@ -737,6 +774,22 @@ export default function ConversationsPage() {
           value={launchSource}
           onValueChange={setLaunchSource}
         />
+        <Select
+          value={feedbackFilter}
+          onValueChange={(v) =>
+            setFeedbackFilter((v ?? "all") as ConversationFeedbackFilter)
+          }
+        >
+          <SelectTrigger className="w-[200px]">
+            <SelectValue placeholder="Feedback" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All feedback</SelectItem>
+            <SelectItem value="up">With thumbs up</SelectItem>
+            <SelectItem value="down">With thumbs down</SelectItem>
+            <SelectItem value="none">No feedback</SelectItem>
+          </SelectContent>
+        </Select>
         <Input
           placeholder="Search messages..."
           className="w-[200px]"
@@ -793,6 +846,7 @@ export default function ConversationsPage() {
               <TableHead>Device</TableHead>
               <TableHead>Source</TableHead>
               <TableHead>Launch</TableHead>
+              <TableHead>Feedback</TableHead>
               <TableHead>Checkout</TableHead>
               <TableHead>Attribution</TableHead>
               <TableHead>End Reason</TableHead>
@@ -823,6 +877,9 @@ export default function ConversationsPage() {
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-5 w-20 rounded-full" />
+                  </TableCell>
+                  <TableCell>
+                    <Skeleton className="h-4 w-16" />
                   </TableCell>
                   <TableCell>
                     <Skeleton className="h-5 w-24 rounded-full" />
@@ -883,6 +940,9 @@ export default function ConversationsPage() {
                         <LaunchIndicator source={c.launchSource} />
                       </TableCell>
                       <TableCell>
+                        <ConversationFeedbackTableCell events={c.events} />
+                      </TableCell>
+                      <TableCell>
                         <CheckoutBadge enrichment={enrichment} />
                       </TableCell>
                       <TableCell>
@@ -899,7 +959,7 @@ export default function ConversationsPage() {
                     </TableRow>
                     {isExpanded && (
                       <TableRow>
-                        <TableCell colSpan={11} className="p-0">
+                        <TableCell colSpan={12} className="p-0">
                           <div className="border-t bg-muted/20 px-6 py-4">
                             <div className="mb-3 flex items-center gap-2">
                               <span className="text-sm font-semibold">
@@ -1114,6 +1174,11 @@ export default function ConversationsPage() {
                                               )}
                                             </div>
                                           )}
+                                          {!isUser && e.feedback ? (
+                                            <MessageFeedbackDetail
+                                              feedback={e.feedback}
+                                            />
+                                          ) : null}
                                         </div>
                                       );
                                     })}
@@ -1162,7 +1227,7 @@ export default function ConversationsPage() {
             {allConversations.length === 0 && !loading && (
               <TableRow>
                 <TableCell
-                  colSpan={11}
+                  colSpan={12}
                   className="text-center text-muted-foreground"
                 >
                   No conversations match your filters.
