@@ -2,8 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { format, subDays } from "date-fns";
-import { DateRangePicker } from "@/components/date-range-picker";
-import { ShopFilter } from "@/components/shop-filter";
+import { DashboardScopeFilter } from "@/components/dashboard-scope-filter";
 import { KpiCard } from "@/components/kpi-card";
 import {
   ChartCard,
@@ -69,11 +68,12 @@ export default function InsightsPage() {
       </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
-        <ShopFilter value={shop} onChange={setShop} />
-        <DateRangePicker
-          from={dateFrom}
-          to={dateTo}
-          onChange={(f, t) => {
+        <DashboardScopeFilter
+          shop={shop}
+          onShopChange={setShop}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateRangeChange={(f, t) => {
             setDateFrom(f);
             setDateTo(t);
           }}

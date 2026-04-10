@@ -2,16 +2,11 @@
 
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { format, subDays } from "date-fns";
-import { DateRangePicker } from "@/components/date-range-picker";
-import { ShopFilter } from "@/components/shop-filter";
-import { KpiCard } from "@/components/kpi-card";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  DashboardScopeFilter,
+  ScopeFilterRow,
+} from "@/components/dashboard-scope-filter";
+import { KpiCard } from "@/components/kpi-card";
 import {
   ShoppingCart,
   TrendingUp,
@@ -32,6 +27,11 @@ import type {
   AiConversationShopGroup,
 } from "@/lib/types";
 import { parseMessage } from "@/lib/message-utils";
+import {
+  checkoutEventMatchesFilters,
+  type CheckoutPlatformFilter,
+  type CheckoutStageFilter,
+} from "@/lib/checkout-filters";
 
 const ATTRIBUTION_CONFIG: Record<
   Attribution,
@@ -72,7 +72,10 @@ export default function CheckoutPage() {
   const [dateFrom, setDateFrom] = useState(() => subDays(new Date(), 30));
   const [dateTo, setDateTo] = useState(() => new Date());
   const [attrFilter, setAttrFilter] = useState("all");
-  const [eventFilter, setEventFilter] = useState("all");
+  const [checkoutPlatform, setCheckoutPlatform] =
+    useState<CheckoutPlatformFilter>("all");
+  const [checkoutStage, setCheckoutStage] =
+    useState<CheckoutStageFilter>("all");
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const [convos, setConvos] = useState<Map<string, AiConversation[]>>(
@@ -139,16 +142,22 @@ export default function CheckoutPage() {
     if (attrFilter !== "all") {
       groups = groups.filter((g) => g.attribution === attrFilter);
     }
-    if (eventFilter !== "all") {
+    if (checkoutPlatform !== "all" || checkoutStage !== "all") {
       groups = groups
         .map((g) => ({
           ...g,
-          events: g.events.filter((e) => e.event === eventFilter),
+          events: g.events.filter((e) =>
+            checkoutEventMatchesFilters(
+              e.event,
+              checkoutPlatform,
+              checkoutStage,
+            ),
+          ),
         }))
         .filter((g) => g.events.length > 0);
     }
     return groups;
-  }, [userGroups, attrFilter, eventFilter]);
+  }, [userGroups, attrFilter, checkoutPlatform, checkoutStage]);
 
   const attrCounts = useMemo(() => {
     const counts: Record<string, number> = {};
@@ -186,6 +195,129 @@ export default function CheckoutPage() {
     return "bg-muted-foreground/40";
   };
 
+  const checkoutFilterCategories = useMemo(() => {
+    const attrSummary =
+      attrFilter === "all"
+        ? "All attributions"
+        : (ATTRIBUTION_CONFIG[attrFilter as Attribution]?.label ?? attrFilter);
+    const platformSummary =
+      checkoutPlatform === "all"
+        ? "Shopify & JUST"
+        : checkoutPlatform === "shopify"
+          ? "Shopify only"
+          : "JUST only";
+    const stageSummary =
+      checkoutStage === "all"
+        ? "All stages"
+        : checkoutStage === "started"
+          ? "Started"
+          : checkoutStage === "completed"
+            ? "Completed"
+            : "JUST redirect";
+
+    return [
+      {
+        id: "attribution",
+        label: "Attribution",
+        summary: attrSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={attrFilter === "all"}
+              onSelect={() => setAttrFilter("all")}
+            >
+              All attributions
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={attrFilter === "direct"}
+              onSelect={() => setAttrFilter("direct")}
+            >
+              Direct
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={attrFilter === "reinforcement"}
+              onSelect={() => setAttrFilter("reinforcement")}
+            >
+              Reinforcement
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={attrFilter === "pdp_shortcut"}
+              onSelect={() => setAttrFilter("pdp_shortcut")}
+            >
+              PDP Shortcut
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={attrFilter === "not_influenced"}
+              onSelect={() => setAttrFilter("not_influenced")}
+            >
+              Not Influenced
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+      {
+        id: "checkout-platform",
+        label: "Checkout channel",
+        summary: platformSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={checkoutPlatform === "all"}
+              onSelect={() => setCheckoutPlatform("all")}
+            >
+              Shopify & JUST
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutPlatform === "shopify"}
+              onSelect={() => setCheckoutPlatform("shopify")}
+            >
+              Shopify checkout
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutPlatform === "just"}
+              onSelect={() => setCheckoutPlatform("just")}
+            >
+              JUST (incl. redirect)
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+      {
+        id: "checkout-stage",
+        label: "Checkout stage",
+        summary: stageSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={checkoutStage === "all"}
+              onSelect={() => setCheckoutStage("all")}
+            >
+              All stages
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutStage === "started"}
+              onSelect={() => setCheckoutStage("started")}
+            >
+              Started
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutStage === "completed"}
+              onSelect={() => setCheckoutStage("completed")}
+            >
+              Completed
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutStage === "redirect"}
+              onSelect={() => setCheckoutStage("redirect")}
+            >
+              JUST redirect to checkout
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+    ];
+  }, [attrFilter, checkoutPlatform, checkoutStage]);
+
   return (
     <div className="mx-auto max-w-5xl px-8 py-10">
       <div className="mb-6">
@@ -198,71 +330,17 @@ export default function CheckoutPage() {
       </div>
 
       <div className="mb-6 flex flex-wrap items-center gap-2">
-        <ShopFilter value={shop} onChange={setShop} />
-        <DateRangePicker
-          from={dateFrom}
-          to={dateTo}
-          onChange={(f, t) => {
+        <DashboardScopeFilter
+          shop={shop}
+          onShopChange={setShop}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateRangeChange={(f, t) => {
             setDateFrom(f);
             setDateTo(t);
           }}
+          extraCategories={checkoutFilterCategories}
         />
-        <Select
-          value={attrFilter}
-          onValueChange={(v) => setAttrFilter(v ?? "all")}
-        >
-          <SelectTrigger className="h-7 w-[160px] border-border bg-transparent text-[12px]">
-            <SelectValue placeholder="Attribution" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-[12px]">
-              All attributions
-            </SelectItem>
-            <SelectItem value="direct" className="text-[12px]">
-              Direct
-            </SelectItem>
-            <SelectItem value="reinforcement" className="text-[12px]">
-              Reinforcement
-            </SelectItem>
-            <SelectItem value="pdp_shortcut" className="text-[12px]">
-              PDP Shortcut
-            </SelectItem>
-            <SelectItem value="not_influenced" className="text-[12px]">
-              Not Influenced
-            </SelectItem>
-          </SelectContent>
-        </Select>
-        <Select
-          value={eventFilter}
-          onValueChange={(v) => setEventFilter(v ?? "all")}
-        >
-          <SelectTrigger className="h-7 w-[180px] border-border bg-transparent text-[12px]">
-            <SelectValue placeholder="Event type" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all" className="text-[12px]">
-              All events
-            </SelectItem>
-            <SelectItem
-              value="shopify_checkout_started"
-              className="text-[12px]"
-            >
-              Shopify Started
-            </SelectItem>
-            <SelectItem
-              value="shopify_checkout_completed"
-              className="text-[12px]"
-            >
-              Shopify Completed
-            </SelectItem>
-            <SelectItem
-              value="just_ai_checkout_redirected"
-              className="text-[12px]"
-            >
-              JUST Redirect
-            </SelectItem>
-          </SelectContent>
-        </Select>
       </div>
 
       {/* KPI row */}

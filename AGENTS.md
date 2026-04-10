@@ -41,7 +41,8 @@ Package manager is **npm** (lockfile: `package-lock.json`). Do not introduce Yar
 - **`app/`** — Next.js App Router: pages (`page.tsx`), layouts, and **Route Handlers** under `app/api/*/route.ts`.
 - **`components/`** — UI and feature components.
   - **`components/ui/`** — shadcn-style primitives (**base-nova** in `components.json`, not “new-york”).
-- **`lib/`** — Shared logic: **`dynamo.ts`** (AWS SSM → STS → DynamoDB), **`posthog.ts`** (server HogQL), **`conversation-posthog-bundle.ts`** (batched HogQL journey + checkout enrich pipeline for the conversations dashboard), **`posthog-row-cache.ts`** (short-lived in-memory bridge between GET `/api/conversations` and POST `posthog-bundle` to avoid duplicate journey HogQL), **`conversation-feedback.ts`** (assistant message vote/reasons summary + Dynamo feedback parsing for the API), **`types.ts`** (domain types aligned with backend Pydantic), **`utils.ts`** (`cn()`, etc.).
+  - **`components/dashboard-scope-filter.tsx`** — unified Notion-style filter popover: left column categories (Shop, Period, …), right column options; pages pass `extraCategories` (summary + panel) and optional `aboveScope`.
+- **`lib/`** — Shared logic: **`dynamo.ts`** (AWS SSM → STS → DynamoDB), **`posthog.ts`** (server HogQL), **`conversation-posthog-bundle.ts`** (batched HogQL journey + checkout enrich pipeline for the conversations dashboard), **`posthog-row-cache.ts`** (short-lived in-memory bridge between GET `/api/conversations` and POST `posthog-bundle` to avoid duplicate journey HogQL), **`conversation-feedback.ts`** (assistant message vote/reasons summary + Dynamo feedback parsing for the API), **`checkout-filters.ts`** (Shopify vs JUST × checkout stage matching for Checkout + Conversations client filters), **`types.ts`** (domain types aligned with backend Pydantic), **`utils.ts`** (`cn()`, etc.).
 - **`public/`** — Static assets.
 
 Path alias: **`@/*`** → project root (`tsconfig.json`).

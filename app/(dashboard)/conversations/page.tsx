@@ -7,20 +7,15 @@ import {
   useCallback,
   useRef,
   Fragment,
-  useSyncExternalStore,
 } from "react";
 import { format, subDays } from "date-fns";
-import { DateRangePicker } from "@/components/date-range-picker";
-import { ShopFilter } from "@/components/shop-filter";
+import {
+  DashboardScopeFilter,
+  ScopeFilterRow,
+  ScopeFilterSection,
+} from "@/components/dashboard-scope-filter";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import {
   Table,
   TableBody,
@@ -56,6 +51,11 @@ import type {
 } from "@/lib/types";
 import { parseMessage, extractPlainText } from "@/lib/message-utils";
 import { summarizeConversationFeedback } from "@/lib/conversation-feedback";
+import type {
+  CheckoutPlatformFilter,
+  CheckoutStageFilter,
+} from "@/lib/checkout-filters";
+import { checkoutEventMatchesFilters } from "@/lib/checkout-filters";
 
 /** Client-side filter on assistant message votes (no API change). */
 type ConversationFeedbackFilter = "all" | "up" | "down" | "none";
@@ -70,6 +70,21 @@ function conversationMatchesFeedbackFilter(
   if (filter === "up") return hasUp;
   if (filter === "down") return hasDown;
   return true;
+}
+
+/** Uses PostHog bundle enrichments; rows not yet enriched stay visible until data loads. */
+function conversationMatchesCheckoutFilters(
+  conversationId: string,
+  enrichments: Record<string, ConversationEnrichment>,
+  platform: CheckoutPlatformFilter,
+  stage: CheckoutStageFilter,
+): boolean {
+  if (platform === "all" && stage === "all") return true;
+  const en = enrichments[conversationId];
+  if (!en) return true;
+  const evs = en.checkoutEvents ?? [];
+  if (evs.length === 0) return false;
+  return evs.some((e) => checkoutEventMatchesFilters(e.event, platform, stage));
 }
 
 interface TimelineEvent {
@@ -109,55 +124,6 @@ const ATTRIBUTION_LABELS: Record<string, string> = {
   not_influenced: "Not Influenced",
   unknown: "Unknown",
 };
-
-function useClientMounted() {
-  return useSyncExternalStore(
-    () => () => {},
-    () => true,
-    () => false,
-  );
-}
-
-/** Real Select only after hydration so server HTML matches first client render (stable vs HMR / id drift). */
-function LaunchSourceFilter({
-  value,
-  onValueChange,
-}: {
-  value: "all" | ConversationLaunchSource;
-  onValueChange: (v: "all" | ConversationLaunchSource) => void;
-}) {
-  const client = useClientMounted();
-
-  if (!client) {
-    return (
-      <div
-        className="flex h-8 w-[168px] shrink-0 items-center rounded-lg border border-input bg-transparent px-2.5 text-sm text-muted-foreground"
-        aria-hidden
-      >
-        Launch…
-      </div>
-    );
-  }
-
-  return (
-    <Select
-      value={value}
-      onValueChange={(v) =>
-        onValueChange((v ?? "all") as "all" | ConversationLaunchSource)
-      }
-    >
-      <SelectTrigger className="w-[168px]">
-        <SelectValue placeholder="Launch" />
-      </SelectTrigger>
-      <SelectContent>
-        <SelectItem value="all">All launches</SelectItem>
-        <SelectItem value="shortcut">Shortcut</SelectItem>
-        <SelectItem value="input">Typed message</SelectItem>
-        <SelectItem value="unknown">Unknown</SelectItem>
-      </SelectContent>
-    </Select>
-  );
-}
 
 function LaunchIndicator({
   source,
@@ -474,6 +440,10 @@ export default function ConversationsPage() {
   >("all");
   const [feedbackFilter, setFeedbackFilter] =
     useState<ConversationFeedbackFilter>("all");
+  const [checkoutPlatform, setCheckoutPlatform] =
+    useState<CheckoutPlatformFilter>("all");
+  const [checkoutStage, setCheckoutStage] =
+    useState<CheckoutStageFilter>("all");
   const [search, setSearch] = useState("");
   const [hideEmpty, setHideEmpty] = useState(true);
   const [tablePage, setTablePage] = useState(0);
@@ -552,6 +522,17 @@ export default function ConversationsPage() {
       );
     }
 
+    if (checkoutPlatform !== "all" || checkoutStage !== "all") {
+      flat = flat.filter((c) =>
+        conversationMatchesCheckoutFilters(
+          c.conversationId,
+          enrichments,
+          checkoutPlatform,
+          checkoutStage,
+        ),
+      );
+    }
+
     if (!search) return flat;
     const lower = search.toLowerCase();
     return flat.filter(
@@ -565,20 +546,48 @@ export default function ConversationsPage() {
           return msg.toLowerCase().includes(lower);
         }),
     );
-  }, [groups, search, hideEmpty, feedbackFilter]);
-
-  useEffect(() => {
-    setTablePage(0);
   }, [
-    shop,
-    dateFrom,
-    dateTo,
-    device,
-    launchSource,
+    groups,
     search,
     hideEmpty,
     feedbackFilter,
+    enrichments,
+    checkoutPlatform,
+    checkoutStage,
   ]);
+
+  /** Single stable useEffect dependency avoids React “deps array changed size” (common with Fast Refresh when deps are edited). */
+  const conversationsTableResetKey = useMemo(
+    () =>
+      [
+        shop,
+        format(dateFrom, "yyyy-MM-dd"),
+        format(dateTo, "yyyy-MM-dd"),
+        device,
+        launchSource,
+        search,
+        hideEmpty ? "1" : "0",
+        feedbackFilter,
+        checkoutPlatform,
+        checkoutStage,
+      ].join("\0"),
+    [
+      shop,
+      dateFrom,
+      dateTo,
+      device,
+      launchSource,
+      search,
+      hideEmpty,
+      feedbackFilter,
+      checkoutPlatform,
+      checkoutStage,
+    ],
+  );
+
+  useEffect(() => {
+    setTablePage(0);
+  }, [conversationsTableResetKey]);
 
   useEffect(() => {
     const max = Math.max(
@@ -741,6 +750,201 @@ export default function ConversationsPage() {
     [enrichments],
   );
 
+  const conversationFilterCategories = useMemo(() => {
+    const deviceSummary =
+      device === "all"
+        ? "All devices"
+        : device === "mobile"
+          ? "Mobile"
+          : "Desktop";
+    const launchSummary =
+      launchSource === "all"
+        ? "All launches"
+        : launchSource === "shortcut"
+          ? "Shortcut"
+          : launchSource === "input"
+            ? "Typed message"
+            : "Unknown";
+    const feedbackSummary =
+      feedbackFilter === "all"
+        ? "All feedback"
+        : feedbackFilter === "up"
+          ? "Thumbs up"
+          : feedbackFilter === "down"
+            ? "Thumbs down"
+            : "No feedback";
+    const checkoutPlatformSummary =
+      checkoutPlatform === "all"
+        ? "Shopify & JUST"
+        : checkoutPlatform === "shopify"
+          ? "Shopify only"
+          : "JUST only";
+    const checkoutStageSummary =
+      checkoutStage === "all"
+        ? "All stages"
+        : checkoutStage === "started"
+          ? "Started"
+          : checkoutStage === "completed"
+            ? "Completed"
+            : "JUST redirect";
+
+    return [
+      {
+        id: "device",
+        label: "Device",
+        summary: deviceSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={device === "all"}
+              onSelect={() => setDevice("all")}
+            >
+              All devices
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={device === "mobile"}
+              onSelect={() => setDevice("mobile")}
+            >
+              Mobile
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={device === "desktop"}
+              onSelect={() => setDevice("desktop")}
+            >
+              Desktop
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+      {
+        id: "launch",
+        label: "Launch",
+        summary: launchSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={launchSource === "all"}
+              onSelect={() => setLaunchSource("all")}
+            >
+              All launches
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={launchSource === "shortcut"}
+              onSelect={() => setLaunchSource("shortcut")}
+            >
+              Shortcut
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={launchSource === "input"}
+              onSelect={() => setLaunchSource("input")}
+            >
+              Typed message
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={launchSource === "unknown"}
+              onSelect={() => setLaunchSource("unknown")}
+            >
+              Unknown
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+      {
+        id: "feedback",
+        label: "Feedback",
+        summary: feedbackSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={feedbackFilter === "all"}
+              onSelect={() => setFeedbackFilter("all")}
+            >
+              All feedback
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={feedbackFilter === "up"}
+              onSelect={() => setFeedbackFilter("up")}
+            >
+              With thumbs up
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={feedbackFilter === "down"}
+              onSelect={() => setFeedbackFilter("down")}
+            >
+              With thumbs down
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={feedbackFilter === "none"}
+              onSelect={() => setFeedbackFilter("none")}
+            >
+              No feedback
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+      {
+        id: "checkout-platform",
+        label: "Checkout channel",
+        summary: checkoutPlatformSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={checkoutPlatform === "all"}
+              onSelect={() => setCheckoutPlatform("all")}
+            >
+              Shopify & JUST
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutPlatform === "shopify"}
+              onSelect={() => setCheckoutPlatform("shopify")}
+            >
+              Shopify checkout
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutPlatform === "just"}
+              onSelect={() => setCheckoutPlatform("just")}
+            >
+              JUST (incl. redirect)
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+      {
+        id: "checkout-stage",
+        label: "Checkout stage",
+        summary: checkoutStageSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={checkoutStage === "all"}
+              onSelect={() => setCheckoutStage("all")}
+            >
+              All stages
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutStage === "started"}
+              onSelect={() => setCheckoutStage("started")}
+            >
+              Started
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutStage === "completed"}
+              onSelect={() => setCheckoutStage("completed")}
+            >
+              Completed
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={checkoutStage === "redirect"}
+              onSelect={() => setCheckoutStage("redirect")}
+            >
+              JUST redirect to checkout
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+    ];
+  }, [device, launchSource, feedbackFilter, checkoutPlatform, checkoutStage]);
+
   return (
     <div className="space-y-4 p-6">
       <div>
@@ -751,64 +955,44 @@ export default function ConversationsPage() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
-        <ShopFilter value={shop} onChange={setShop} />
-        <DateRangePicker
-          from={dateFrom}
-          to={dateTo}
-          onChange={(f, t) => {
+        <DashboardScopeFilter
+          shop={shop}
+          onShopChange={setShop}
+          dateFrom={dateFrom}
+          dateTo={dateTo}
+          onDateRangeChange={(f, t) => {
             setDateFrom(f);
             setDateTo(t);
           }}
-        />
-        <Select value={device} onValueChange={(v) => setDevice(v ?? "all")}>
-          <SelectTrigger className="w-[140px]">
-            <SelectValue placeholder="Device" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All devices</SelectItem>
-            <SelectItem value="mobile">Mobile</SelectItem>
-            <SelectItem value="desktop">Desktop</SelectItem>
-          </SelectContent>
-        </Select>
-        <LaunchSourceFilter
-          value={launchSource}
-          onValueChange={setLaunchSource}
-        />
-        <Select
-          value={feedbackFilter}
-          onValueChange={(v) =>
-            setFeedbackFilter((v ?? "all") as ConversationFeedbackFilter)
+          aboveScope={
+            <>
+              <ScopeFilterSection title="Search">
+                <div className="px-2">
+                  <Input
+                    placeholder="Messages, shop, conversation ID…"
+                    className="h-8 text-[13px]"
+                    value={search}
+                    onChange={(e) => setSearch(e.target.value)}
+                  />
+                </div>
+              </ScopeFilterSection>
+              <div className="flex items-center justify-between gap-3 px-2 py-1">
+                <label
+                  htmlFor="hide-empty"
+                  className="cursor-pointer text-[13px] leading-snug select-none"
+                >
+                  Hide conversations with no messages
+                </label>
+                <Switch
+                  id="hide-empty"
+                  checked={hideEmpty}
+                  onCheckedChange={setHideEmpty}
+                />
+              </div>
+            </>
           }
-        >
-          <SelectTrigger className="w-[200px]">
-            <SelectValue placeholder="Feedback" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All feedback</SelectItem>
-            <SelectItem value="up">With thumbs up</SelectItem>
-            <SelectItem value="down">With thumbs down</SelectItem>
-            <SelectItem value="none">No feedback</SelectItem>
-          </SelectContent>
-        </Select>
-        <Input
-          placeholder="Search messages..."
-          className="w-[200px]"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
+          extraCategories={conversationFilterCategories}
         />
-        <div className="flex items-center gap-2">
-          <Switch
-            id="hide-empty"
-            checked={hideEmpty}
-            onCheckedChange={setHideEmpty}
-          />
-          <label
-            htmlFor="hide-empty"
-            className="text-sm cursor-pointer select-none"
-          >
-            Hide empty
-          </label>
-        </div>
       </div>
 
       <div className="flex items-center gap-3 text-sm text-muted-foreground">
