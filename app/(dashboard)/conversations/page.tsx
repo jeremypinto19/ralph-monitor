@@ -712,7 +712,7 @@ export default function ConversationsPage() {
   const [tablePage, setTablePage] = useState(0);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const closingFromUiRef = useRef(false);
-  const [copiedConversationId, setCopiedConversationId] = useState(false);
+  const [copiedConversationUrl, setCopiedConversationUrl] = useState(false);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -1063,21 +1063,24 @@ export default function ConversationsPage() {
     [expandedId],
   );
 
-  const copyActiveConversationId = useCallback(() => {
+  const copyConversationShareUrl = useCallback(() => {
     if (!activeConversation) return;
+    const params = new URLSearchParams();
+    params.set("conversationId", activeConversation.conversationId);
+    const shareUrl = `${window.location.origin}${pathname}?${params.toString()}`;
     void navigator.clipboard
-      .writeText(activeConversation.conversationId)
+      .writeText(shareUrl)
       .then(() => {
-        setCopiedConversationId(true);
-        window.setTimeout(() => setCopiedConversationId(false), 2000);
+        setCopiedConversationUrl(true);
+        window.setTimeout(() => setCopiedConversationUrl(false), 2000);
       })
       .catch(() => {
         /* ignore */
       });
-  }, [activeConversation]);
+  }, [activeConversation, pathname]);
 
   useEffect(() => {
-    setCopiedConversationId(false);
+    setCopiedConversationUrl(false);
   }, [activeConversation?.conversationId]);
 
   const handleJourneyRetry = useCallback(
@@ -1457,9 +1460,9 @@ export default function ConversationsPage() {
                 variant="secondary"
                 size="sm"
                 className="mx-2 inline-flex w-full max-w-full shrink-0 items-center justify-center font-medium"
-                onClick={copyActiveConversationId}
+                onClick={copyConversationShareUrl}
               >
-                {copiedConversationId ? (
+                {copiedConversationUrl ? (
                   <>
                     <Check
                       className="mr-2 h-4 w-4 shrink-0 text-emerald-600"
@@ -1470,7 +1473,7 @@ export default function ConversationsPage() {
                 ) : (
                   <>
                     <Copy className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-                    Copy conversation ID
+                    Copy link to this conversation
                   </>
                 )}
               </Button>
