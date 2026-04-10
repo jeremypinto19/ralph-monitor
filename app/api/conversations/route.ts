@@ -7,6 +7,10 @@ import {
 } from "@/lib/conversations-api-cache";
 import { setPosthogRowCache } from "@/lib/posthog-row-cache";
 import { parseSanitizedAssistantFeedback } from "@/lib/conversation-feedback";
+import {
+  conversationMatchesSourceModeFilter,
+  parseConversationSourceModeFilter,
+} from "@/lib/conversation-source-mode";
 import type {
   AiConversationEvent,
   AiConversation,
@@ -203,6 +207,9 @@ export async function GET(request: Request) {
     const dateTo = searchParams.get("dateTo");
     const deviceFilter = searchParams.get("device");
     const modeFilter = searchParams.get("mode");
+    const sourceModeFilter = parseConversationSourceModeFilter(
+      searchParams.get("sourceMode"),
+    );
     const launchSourceFilter = searchParams.get("launchSource");
 
     const items = await loadAiAgentConversationItems();
@@ -267,9 +274,6 @@ export async function GET(request: Request) {
     if (deviceFilter) {
       conversations = conversations.filter((c) => c.device === deviceFilter);
     }
-    if (modeFilter) {
-      conversations = conversations.filter((c) => c.mode === modeFilter);
-    }
 
     const shopIds = [...new Set(conversations.map((c) => c.shopId))];
     const shopNames = await resolveShopNamesCached(shopIds);
@@ -309,6 +313,15 @@ export async function GET(request: Request) {
         const resolved = c.launchSource ?? "unknown";
         return resolved === launchSourceFilter;
       });
+    }
+
+    if (modeFilter) {
+      conversations = conversations.filter((c) => c.mode === modeFilter);
+    }
+    if (sourceModeFilter !== "all") {
+      conversations = conversations.filter((c) =>
+        conversationMatchesSourceModeFilter(c.mode, sourceModeFilter),
+      );
     }
 
     const groups: AiConversationShopGroup[] = [];

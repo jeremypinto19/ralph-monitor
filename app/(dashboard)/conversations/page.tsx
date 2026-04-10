@@ -56,6 +56,7 @@ import type {
   CheckoutStageFilter,
 } from "@/lib/checkout-filters";
 import { checkoutEventMatchesFilters } from "@/lib/checkout-filters";
+import type { ConversationSourceModeFilter } from "@/lib/conversation-source-mode";
 
 /** Client-side filter on assistant message votes (no API change). */
 type ConversationFeedbackFilter = "all" | "up" | "down" | "none";
@@ -435,6 +436,8 @@ export default function ConversationsPage() {
   const [dateFrom, setDateFrom] = useState(() => subDays(new Date(), 7));
   const [dateTo, setDateTo] = useState(() => new Date());
   const [device, setDevice] = useState("all");
+  const [sourceMode, setSourceMode] =
+    useState<ConversationSourceModeFilter>("all");
   const [launchSource, setLaunchSource] = useState<
     "all" | ConversationLaunchSource
   >("all");
@@ -467,6 +470,20 @@ export default function ConversationsPage() {
     string | null
   >(null);
 
+  /** Single stable useEffect dependency — avoids “deps array changed size” on Fast Refresh. */
+  const conversationsFetchKey = useMemo(
+    () =>
+      [
+        shop,
+        format(dateFrom, "yyyy-MM-dd"),
+        format(dateTo, "yyyy-MM-dd"),
+        device,
+        sourceMode,
+        launchSource,
+      ].join("\0"),
+    [shop, dateFrom, dateTo, device, sourceMode, launchSource],
+  );
+
   useEffect(() => {
     let cancelled = false;
     void (async () => {
@@ -477,6 +494,7 @@ export default function ConversationsPage() {
       params.set("dateTo", format(dateTo, "yyyy-MM-dd"));
       if (shop !== "all") params.set("shopId", shop);
       if (device !== "all") params.set("device", device);
+      if (sourceMode !== "all") params.set("sourceMode", sourceMode);
       if (launchSource !== "all") params.set("launchSource", launchSource);
 
       try {
@@ -501,7 +519,8 @@ export default function ConversationsPage() {
     return () => {
       cancelled = true;
     };
-  }, [shop, dateFrom, dateTo, device, launchSource]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `conversationsFetchKey` encodes shop/date/device/source/launch; a fixed-size deps array avoids Fast Refresh “changed size” errors.
+  }, [conversationsFetchKey]);
 
   const allConversations = useMemo(() => {
     let flat: ConvWithShop[] = groups.flatMap((g) =>
@@ -564,6 +583,7 @@ export default function ConversationsPage() {
         format(dateFrom, "yyyy-MM-dd"),
         format(dateTo, "yyyy-MM-dd"),
         device,
+        sourceMode,
         launchSource,
         search,
         hideEmpty ? "1" : "0",
@@ -576,6 +596,7 @@ export default function ConversationsPage() {
       dateFrom,
       dateTo,
       device,
+      sourceMode,
       launchSource,
       search,
       hideEmpty,
@@ -757,6 +778,12 @@ export default function ConversationsPage() {
         : device === "mobile"
           ? "Mobile"
           : "Desktop";
+    const sourceSummary =
+      sourceMode === "all"
+        ? "All sources"
+        : sourceMode === "search"
+          ? "Search Mode"
+          : "Project Focus Mode";
     const launchSummary =
       launchSource === "all"
         ? "All launches"
@@ -812,6 +839,33 @@ export default function ConversationsPage() {
               onSelect={() => setDevice("desktop")}
             >
               Desktop
+            </ScopeFilterRow>
+          </div>
+        ),
+      },
+      {
+        id: "source",
+        label: "Source",
+        summary: sourceSummary,
+        panel: (
+          <div className="space-y-0.5">
+            <ScopeFilterRow
+              selected={sourceMode === "all"}
+              onSelect={() => setSourceMode("all")}
+            >
+              All sources
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={sourceMode === "search"}
+              onSelect={() => setSourceMode("search")}
+            >
+              Search Mode
+            </ScopeFilterRow>
+            <ScopeFilterRow
+              selected={sourceMode === "project_focus"}
+              onSelect={() => setSourceMode("project_focus")}
+            >
+              Project Focus Mode
             </ScopeFilterRow>
           </div>
         ),
@@ -943,7 +997,14 @@ export default function ConversationsPage() {
         ),
       },
     ];
-  }, [device, launchSource, feedbackFilter, checkoutPlatform, checkoutStage]);
+  }, [
+    device,
+    sourceMode,
+    launchSource,
+    feedbackFilter,
+    checkoutPlatform,
+    checkoutStage,
+  ]);
 
   return (
     <div className="space-y-4 px-4 py-6 sm:px-6">
