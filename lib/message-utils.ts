@@ -1,3 +1,5 @@
+import type { MessageBookmark } from "@/lib/types";
+
 export interface Recommendation {
   handle: string;
   title: string;
@@ -270,4 +272,39 @@ export function parseMessage(data: Record<string, unknown>): ParsedMessage {
 export function extractPlainText(data: Record<string, unknown>): string {
   const { text } = parseMessage(data);
   return text;
+}
+
+/**
+ * Parses `data.bookmark` on user messages. Invalid or partial payloads return null.
+ */
+export function parseMessageBookmark(
+  data: Record<string, unknown>,
+): MessageBookmark | null {
+  const raw = data.bookmark;
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
+  const o = raw as Record<string, unknown>;
+  const handle = typeof o.handle === "string" ? o.handle.trim() : "";
+  const title = typeof o.title === "string" ? o.title.trim() : "";
+  const price = typeof o.price === "string" ? o.price.trim() : "";
+  if (!handle || !title) return null;
+
+  let imageUrl: string | undefined;
+  if (typeof o.imageUrl === "string" && o.imageUrl.trim()) {
+    const candidate = o.imageUrl.trim();
+    try {
+      const parsed = new URL(candidate);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        imageUrl = candidate;
+      }
+    } catch {
+      /* ignore invalid */
+    }
+  }
+
+  const compareAtPrice =
+    typeof o.compareAtPrice === "string" && o.compareAtPrice.trim()
+      ? o.compareAtPrice.trim()
+      : undefined;
+
+  return { handle, title, imageUrl, price, compareAtPrice };
 }

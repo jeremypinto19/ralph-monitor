@@ -1,5 +1,17 @@
 // TypeScript types mirroring Pydantic models from main.py
 
+/**
+ * Product bookmark attached to a `user_message` event (`data.bookmark`).
+ * Mirrors `ZMessageBookmark` in `@getjust/api-schema/ai-commerce-agent`.
+ */
+export interface MessageBookmark {
+  handle: string;
+  title: string;
+  imageUrl?: string;
+  price: string;
+  compareAtPrice?: string;
+}
+
 /** User vote on an assistant reply; set via DynamoDB update on the event item. */
 export interface AssistantMessageFeedback {
   vote: "up" | "down";

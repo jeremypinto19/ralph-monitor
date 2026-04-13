@@ -23,9 +23,6 @@ export async function POST(request: Request) {
     passwordBuffer.length !== expectedBuffer.length ||
     !timingSafeEqual(passwordBuffer, expectedBuffer)
   ) {
-    console.warn("[LOGIN] Wrong password attempt");
-    console.log("[LOGIN] Expected password:", expected);
-    console.log("[LOGIN] Secret:", secret);
     return NextResponse.json({ error: "Wrong password" }, { status: 401 });
   }
 

@@ -28,12 +28,14 @@ import { Input } from "@/components/ui/input";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import {
+  Bookmark,
   Check,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
   ExternalLink,
+  FileText,
   Keyboard,
   ListOrdered,
   Loader2,
@@ -52,7 +54,11 @@ import type {
   ConversationEnrichment,
   ConversationLaunchSource,
 } from "@/lib/types";
-import { parseMessage, extractPlainText } from "@/lib/message-utils";
+import {
+  parseMessage,
+  extractPlainText,
+  parseMessageBookmark,
+} from "@/lib/message-utils";
 import { summarizeConversationFeedback } from "@/lib/conversation-feedback";
 import type {
   CheckoutPlatformFilter,
@@ -441,9 +447,122 @@ function conversationMailPreview(c: ConvWithShop): string {
         e.eventType === "user_message" || e.eventType === "assistant_message",
     );
   if (!ev) return "";
-  const t = extractPlainText((ev.data ?? {}) as Record<string, unknown>).trim();
-  if (!t) return "";
-  return t.length > 120 ? `${t.slice(0, 117)}…` : t;
+  const data = (ev.data ?? {}) as Record<string, unknown>;
+  const t = extractPlainText(data).trim();
+  const bm = parseMessageBookmark(data);
+  const combined =
+    t && bm
+      ? `${t} · ${bm.title}`
+      : t || (bm ? `${bm.title} (${bm.handle})` : "");
+  if (!combined) return "";
+  return combined.length > 120 ? `${combined.slice(0, 117)}…` : combined;
+}
+
+/** Plain-text transcript of chat messages (same basis as the Chat tab). */
+function formatCompleteConversationText(c: ConvWithShop): string {
+  const lines: string[] = [
+    `Shop: ${c.shopName}`,
+    `Conversation ID: ${c.conversationId}`,
+    c.startedAt
+      ? `Started: ${format(new Date(c.startedAt), "yyyy-MM-dd HH:mm:ss")}`
+      : null,
+    c.device ? `Device: ${c.device}` : null,
+    c.mode ? `Mode: ${c.mode}` : null,
+    "",
+    "---",
+    "",
+  ].filter((x): x is string => x != null);
+
+  const chatEvents = c.events.filter(
+    (e) =>
+      e.eventType === "user_message" || e.eventType === "assistant_message",
+  );
+
+  for (const e of chatEvents) {
+    const isUser = e.eventType === "user_message";
+    const parsed = parseMessage((e.data ?? {}) as Record<string, unknown>);
+    const displayText = parsed.text || JSON.stringify(e.data);
+    const messageModeFromData = String(
+      (e.data as Record<string, unknown>).mode ?? "",
+    ).trim();
+    const messageModeLabel = messageModeFromData || (c.mode ?? "");
+
+    lines.push(
+      `[${isUser ? "User" : "Ralph"}] ${format(new Date(e.createdAt), "yyyy-MM-dd HH:mm:ss")}`,
+    );
+    if (isUser && messageModeLabel) {
+      lines.push(`Mode: ${messageModeLabel}`);
+    }
+    if (!isUser && parsed.lang) {
+      lines.push(`Lang: ${parsed.lang}`);
+    }
+    lines.push(displayText);
+
+    if (isUser) {
+      const bm = parseMessageBookmark(
+        (e.data ?? {}) as Record<string, unknown>,
+      );
+      if (bm) {
+        lines.push("", "Bookmark:", `- ${bm.title} (${bm.handle})`);
+        if (bm.price) lines.push(`  Price: ${bm.price}`);
+        if (bm.compareAtPrice) {
+          lines.push(`  Compare at: ${bm.compareAtPrice}`);
+        }
+        if (bm.imageUrl) lines.push(`  Image: ${bm.imageUrl}`);
+      }
+    }
+
+    if (
+      !isUser &&
+      (parsed.recommendations.length > 0 ||
+        parsed.links.length > 0 ||
+        parsed.questions.length > 0 ||
+        parsed.action != null)
+    ) {
+      if (parsed.recommendations.length > 0) {
+        lines.push("", "Recommendations:");
+        for (const rec of parsed.recommendations) {
+          const bits = [rec.title, rec.price, rec.compareAtPrice].filter(
+            Boolean,
+          );
+          lines.push(`- ${bits.join(" · ")}`);
+        }
+      }
+      if (parsed.links.length > 0) {
+        lines.push("", "Links:");
+        for (const link of parsed.links) {
+          lines.push(
+            `- ${link.label && link.label !== link.url ? `${link.label} — ` : ""}${link.url}`,
+          );
+        }
+      }
+      if (parsed.questions.length > 0) {
+        lines.push("", "Questions:");
+        for (const q of parsed.questions) {
+          if (q.prompt) lines.push(`- ${q.prompt}`);
+          if (q.options.length > 0) {
+            lines.push(`  Options: ${q.options.join(", ")}`);
+          }
+        }
+      }
+      if (parsed.action) {
+        lines.push("", "Action:");
+        for (const [k, v] of Object.entries(parsed.action)) {
+          lines.push(
+            `  ${k}: ${typeof v === "object" && v !== null ? JSON.stringify(v) : String(v)}`,
+          );
+        }
+      }
+    }
+
+    lines.push("");
+  }
+
+  if (chatEvents.length === 0) {
+    lines.push("(No messages in this conversation.)");
+  }
+
+  return lines.join("\n").trimEnd();
 }
 
 function ConversationDetailPanel({
@@ -501,6 +620,11 @@ function ConversationDetailPanel({
                   (e.data as Record<string, unknown>).mode ?? "",
                 ).trim();
                 const messageModeLabel = messageModeFromData || (c.mode ?? "");
+                const bookmark = isUser
+                  ? parseMessageBookmark(
+                      (e.data ?? {}) as Record<string, unknown>,
+                    )
+                  : null;
                 const showRalphPayload =
                   !isUser &&
                   (parsed.recommendations.length > 0 ||
@@ -541,6 +665,45 @@ function ConversationDetailPanel({
                     <div className="whitespace-pre-wrap break-words">
                       {displayText}
                     </div>
+                    {bookmark && (
+                      <div className="mt-2 border-t border-primary-foreground/25 pt-2">
+                        <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide opacity-80">
+                          <Bookmark className="h-3 w-3" />
+                          Bookmark
+                        </div>
+                        <div className="flex gap-2 rounded-md bg-primary-foreground/10 p-2">
+                          {bookmark.imageUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element -- arbitrary merchant CDN URLs
+                            <img
+                              src={bookmark.imageUrl}
+                              alt=""
+                              className="h-14 w-14 shrink-0 rounded-md object-cover"
+                              loading="lazy"
+                            />
+                          ) : null}
+                          <div className="min-w-0 flex-1 space-y-0.5">
+                            <p className="font-medium leading-snug">
+                              {bookmark.title}
+                            </p>
+                            <p className="font-mono text-[11px] opacity-80">
+                              {bookmark.handle}
+                            </p>
+                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0 text-xs">
+                              {bookmark.price ? (
+                                <span className="font-medium">
+                                  {bookmark.price}
+                                </span>
+                              ) : null}
+                              {bookmark.compareAtPrice ? (
+                                <span className="opacity-70 line-through">
+                                  {bookmark.compareAtPrice}
+                                </span>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    )}
                     {showRalphPayload && (
                       <div className="mt-2 space-y-3 border-t border-border/30 pt-2">
                         {parsed.recommendations.length > 0 && (
@@ -713,6 +876,7 @@ export default function ConversationsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const closingFromUiRef = useRef(false);
   const [copiedConversationUrl, setCopiedConversationUrl] = useState(false);
+  const [copiedConversationFull, setCopiedConversationFull] = useState(false);
 
   const router = useRouter();
   const pathname = usePathname();
@@ -825,10 +989,14 @@ export default function ConversationsPage() {
         c.conversationId.toLowerCase().includes(lower) ||
         c.shopName.toLowerCase().includes(lower) ||
         c.events.some((e) => {
-          const msg = extractPlainText(
-            (e.data ?? {}) as Record<string, unknown>,
+          const data = (e.data ?? {}) as Record<string, unknown>;
+          const msg = extractPlainText(data);
+          if (msg.toLowerCase().includes(lower)) return true;
+          const bm = parseMessageBookmark(data);
+          if (!bm) return false;
+          return [bm.title, bm.handle, bm.price, bm.compareAtPrice ?? ""].some(
+            (bit) => bit.toLowerCase().includes(lower),
           );
-          return msg.toLowerCase().includes(lower);
         }),
     );
   }, [
@@ -1079,8 +1247,23 @@ export default function ConversationsPage() {
       });
   }, [activeConversation, pathname]);
 
+  const copyConversationFullText = useCallback(() => {
+    if (!activeConversation) return;
+    const text = formatCompleteConversationText(activeConversation);
+    void navigator.clipboard
+      .writeText(text)
+      .then(() => {
+        setCopiedConversationFull(true);
+        window.setTimeout(() => setCopiedConversationFull(false), 2000);
+      })
+      .catch(() => {
+        /* ignore */
+      });
+  }, [activeConversation]);
+
   useEffect(() => {
     setCopiedConversationUrl(false);
+    setCopiedConversationFull(false);
   }, [activeConversation?.conversationId]);
 
   const handleJourneyRetry = useCallback(
@@ -1455,28 +1638,52 @@ export default function ConversationsPage() {
                   />
                 )}
               </div>
-              <Button
-                type="button"
-                variant="secondary"
-                size="sm"
-                className="mx-2 inline-flex w-full max-w-full shrink-0 items-center justify-center font-medium"
-                onClick={copyConversationShareUrl}
-              >
-                {copiedConversationUrl ? (
-                  <>
-                    <Check
-                      className="mr-2 h-4 w-4 shrink-0 text-emerald-600"
-                      aria-hidden
-                    />
-                    Copied
-                  </>
-                ) : (
-                  <>
-                    <Copy className="mr-2 h-4 w-4 shrink-0" aria-hidden />
-                    Copy link to this conversation
-                  </>
-                )}
-              </Button>
+              <div className="mx-2 grid grid-cols-2 gap-2">
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="inline-flex w-full max-w-full shrink-0 items-center justify-center gap-2 font-medium"
+                  onClick={copyConversationShareUrl}
+                >
+                  {copiedConversationUrl ? (
+                    <>
+                      <Check
+                        className="h-4 w-4 shrink-0 text-emerald-600"
+                        aria-hidden
+                      />
+                      Link copied
+                    </>
+                  ) : (
+                    <>
+                      <Copy className="h-4 w-4 shrink-0" aria-hidden />
+                      Copy conversation link
+                    </>
+                  )}
+                </Button>
+                <Button
+                  type="button"
+                  variant="secondary"
+                  size="sm"
+                  className="inline-flex w-full max-w-full shrink-0 items-center justify-center gap-2 font-medium"
+                  onClick={copyConversationFullText}
+                >
+                  {copiedConversationFull ? (
+                    <>
+                      <Check
+                        className="h-4 w-4 shrink-0 text-emerald-600"
+                        aria-hidden
+                      />
+                      Transcript copied
+                    </>
+                  ) : (
+                    <>
+                      <FileText className="h-4 w-4 shrink-0" aria-hidden />
+                      Copy complete conversation
+                    </>
+                  )}
+                </Button>
+              </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
               <ConversationDetailPanel
@@ -1745,6 +1952,58 @@ export default function ConversationsPage() {
                     {isExpanded && (
                       <TableRow>
                         <TableCell colSpan={12} className="p-0">
+                          <div className="flex flex-wrap items-center gap-2 border-b bg-muted/30 px-4 py-2">
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="gap-2"
+                              onClick={copyConversationShareUrl}
+                            >
+                              {copiedConversationUrl ? (
+                                <>
+                                  <Check
+                                    className="h-4 w-4 shrink-0 text-emerald-600"
+                                    aria-hidden
+                                  />
+                                  Link copied
+                                </>
+                              ) : (
+                                <>
+                                  <Copy
+                                    className="h-4 w-4 shrink-0"
+                                    aria-hidden
+                                  />
+                                  Copy conversation link
+                                </>
+                              )}
+                            </Button>
+                            <Button
+                              type="button"
+                              variant="secondary"
+                              size="sm"
+                              className="gap-2"
+                              onClick={copyConversationFullText}
+                            >
+                              {copiedConversationFull ? (
+                                <>
+                                  <Check
+                                    className="h-4 w-4 shrink-0 text-emerald-600"
+                                    aria-hidden
+                                  />
+                                  Transcript copied
+                                </>
+                              ) : (
+                                <>
+                                  <FileText
+                                    className="h-4 w-4 shrink-0"
+                                    aria-hidden
+                                  />
+                                  Copy complete conversation
+                                </>
+                              )}
+                            </Button>
+                          </div>
                           <ConversationDetailPanel
                             c={c}
                             enrichment={enrichment}
