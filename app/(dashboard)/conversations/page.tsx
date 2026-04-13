@@ -584,6 +584,15 @@ function ConversationDetailPanel({
   showMetaHeading?: boolean;
   className?: string;
 }) {
+  const chatEvents = useMemo(
+    () =>
+      c.events.filter(
+        (e) =>
+          e.eventType === "user_message" || e.eventType === "assistant_message",
+      ),
+    [c.events],
+  );
+
   return (
     <div className={cn("border-t bg-muted/20 px-4 py-4 sm:px-6", className)}>
       {showMetaHeading && (
@@ -604,223 +613,213 @@ function ConversationDetailPanel({
 
         <TabsContent value="chat">
           <div className="max-h-[60vh] space-y-3 overflow-y-auto pr-4">
-            {c.events
-              .filter(
-                (e) =>
-                  e.eventType === "user_message" ||
-                  e.eventType === "assistant_message",
-              )
-              .map((e, i) => {
-                const isUser = e.eventType === "user_message";
-                const parsed = parseMessage(
-                  (e.data ?? {}) as Record<string, unknown>,
-                );
-                const displayText = parsed.text || JSON.stringify(e.data);
-                const messageModeFromData = String(
-                  (e.data as Record<string, unknown>).mode ?? "",
-                ).trim();
-                const messageModeLabel = messageModeFromData || (c.mode ?? "");
-                const bookmark = isUser
-                  ? parseMessageBookmark(
-                      (e.data ?? {}) as Record<string, unknown>,
-                    )
-                  : null;
-                const showRalphPayload =
-                  !isUser &&
-                  (parsed.recommendations.length > 0 ||
-                    parsed.links.length > 0 ||
-                    parsed.questions.length > 0 ||
-                    parsed.action != null);
-                return (
-                  <div
-                    key={i}
-                    className={`rounded-lg p-3 text-sm ${
-                      isUser
-                        ? "ml-8 bg-primary text-primary-foreground"
-                        : "mr-8 bg-muted"
-                    }`}
-                  >
-                    <div className="mb-1 flex flex-wrap items-center gap-2 text-xs opacity-70">
-                      <span>
-                        {isUser ? "User" : "Ralph"} &middot;{" "}
-                        {format(new Date(e.createdAt), "HH:mm:ss")}
-                      </span>
-                      {isUser && messageModeLabel && (
-                        <Badge
-                          variant="secondary"
-                          className="h-5 px-1.5 text-[10px] font-normal capitalize opacity-90"
-                        >
-                          {messageModeLabel}
-                        </Badge>
-                      )}
-                      {!isUser && parsed.lang && (
-                        <Badge
-                          variant="outline"
-                          className="h-5 px-1.5 text-[10px] font-normal opacity-90"
-                        >
-                          {parsed.lang}
-                        </Badge>
-                      )}
-                    </div>
-                    <div className="whitespace-pre-wrap break-words">
-                      {displayText}
-                    </div>
-                    {bookmark && (
-                      <div className="mt-2 border-t border-primary-foreground/25 pt-2">
-                        <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide opacity-80">
-                          <Bookmark className="h-3 w-3" />
-                          Bookmark
-                        </div>
-                        <div className="flex gap-2 rounded-md bg-primary-foreground/10 p-2">
-                          {bookmark.imageUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element -- arbitrary merchant CDN URLs
-                            <img
-                              src={bookmark.imageUrl}
-                              alt=""
-                              className="h-14 w-14 shrink-0 rounded-md object-cover"
-                              loading="lazy"
-                            />
-                          ) : null}
-                          <div className="min-w-0 flex-1 space-y-0.5">
-                            <p className="font-medium leading-snug">
-                              {bookmark.title}
-                            </p>
-                            <p className="font-mono text-[11px] opacity-80">
-                              {bookmark.handle}
-                            </p>
-                            <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0 text-xs">
-                              {bookmark.price ? (
-                                <span className="font-medium">
-                                  {bookmark.price}
-                                </span>
-                              ) : null}
-                              {bookmark.compareAtPrice ? (
-                                <span className="opacity-70 line-through">
-                                  {bookmark.compareAtPrice}
-                                </span>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
+            {chatEvents.map((e, i) => {
+              const isUser = e.eventType === "user_message";
+              const parsed = parseMessage(
+                (e.data ?? {}) as Record<string, unknown>,
+              );
+              const displayText = parsed.text || JSON.stringify(e.data);
+              const messageModeFromData = String(
+                (e.data as Record<string, unknown>).mode ?? "",
+              ).trim();
+              const messageModeLabel = messageModeFromData || (c.mode ?? "");
+              const bookmark = isUser
+                ? parseMessageBookmark(
+                    (e.data ?? {}) as Record<string, unknown>,
+                  )
+                : null;
+              const showRalphPayload =
+                !isUser &&
+                (parsed.recommendations.length > 0 ||
+                  parsed.links.length > 0 ||
+                  parsed.questions.length > 0 ||
+                  parsed.action != null);
+              return (
+                <div
+                  key={i}
+                  className={`rounded-lg p-3 text-sm ${
+                    isUser
+                      ? "ml-8 bg-primary text-primary-foreground"
+                      : "mr-8 bg-muted"
+                  }`}
+                >
+                  <div className="mb-1 flex flex-wrap items-center gap-2 text-xs opacity-70">
+                    <span>
+                      {isUser ? "User" : "Ralph"} &middot;{" "}
+                      {format(new Date(e.createdAt), "HH:mm:ss")}
+                    </span>
+                    {isUser && messageModeLabel && (
+                      <Badge
+                        variant="secondary"
+                        className="h-5 px-1.5 text-[10px] font-normal capitalize opacity-90"
+                      >
+                        {messageModeLabel}
+                      </Badge>
                     )}
-                    {showRalphPayload && (
-                      <div className="mt-2 space-y-3 border-t border-border/30 pt-2">
-                        {parsed.recommendations.length > 0 && (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              <Zap className="h-3 w-3" />
-                              Recommendations
-                            </div>
-                            {parsed.recommendations.map((rec, ri) => (
-                              <div
-                                key={ri}
-                                className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
-                              >
-                                <span className="font-medium">{rec.title}</span>
-                                {rec.price && (
-                                  <span className="text-muted-foreground">
-                                    {rec.price}
-                                  </span>
-                                )}
-                                {rec.compareAtPrice && (
-                                  <span className="text-muted-foreground line-through">
-                                    {rec.compareAtPrice}
-                                  </span>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {parsed.links.length > 0 && (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              <ExternalLink className="h-3 w-3" />
-                              Links
-                            </div>
-                            <ul className="list-none space-y-1 pl-0">
-                              {parsed.links.map((link, li) => (
-                                <li key={li}>
-                                  <a
-                                    href={link.url}
-                                    target="_blank"
-                                    rel="noopener noreferrer"
-                                    className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
-                                  >
-                                    <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
-                                    {link.label || link.url}
-                                  </a>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                        {parsed.questions.length > 0 && (
-                          <div className="space-y-2">
-                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              <ListOrdered className="h-3 w-3" />
-                              Questions
-                            </div>
-                            {parsed.questions.map((q, qi) => (
-                              <div
-                                key={qi}
-                                className="rounded-md border border-border/40 bg-background/40 px-2 py-1.5"
-                              >
-                                {q.prompt && (
-                                  <p className="text-xs font-medium">
-                                    {q.prompt}
-                                  </p>
-                                )}
-                                {q.options.length > 0 && (
-                                  <div className="mt-1.5 flex flex-wrap gap-1">
-                                    {q.options.map((opt, oi) => (
-                                      <Badge
-                                        key={oi}
-                                        variant="secondary"
-                                        className="text-[10px] font-normal"
-                                      >
-                                        {opt}
-                                      </Badge>
-                                    ))}
-                                  </div>
-                                )}
-                              </div>
-                            ))}
-                          </div>
-                        )}
-                        {parsed.action && (
-                          <div className="space-y-1">
-                            <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                              <MousePointerClick className="h-3 w-3" />
-                              Action
-                            </div>
-                            <div className="space-y-0.5 rounded-md border border-border/40 bg-background/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed">
-                              {Object.entries(parsed.action).map(([k, v]) => (
-                                <div key={k}>
-                                  <span className="text-muted-foreground">
-                                    {k}:
-                                  </span>{" "}
-                                  {typeof v === "object" && v !== null
-                                    ? JSON.stringify(v)
-                                    : String(v)}
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        )}
-                      </div>
+                    {!isUser && parsed.lang && (
+                      <Badge
+                        variant="outline"
+                        className="h-5 px-1.5 text-[10px] font-normal opacity-90"
+                      >
+                        {parsed.lang}
+                      </Badge>
                     )}
-                    {!isUser && e.feedback ? (
-                      <MessageFeedbackDetail feedback={e.feedback} />
-                    ) : null}
                   </div>
-                );
-              })}
-            {c.events.filter(
-              (e) =>
-                e.eventType === "user_message" ||
-                e.eventType === "assistant_message",
-            ).length === 0 && (
+                  <div className="whitespace-pre-wrap break-words">
+                    {displayText}
+                  </div>
+                  {bookmark && (
+                    <div className="mt-2 border-t border-primary-foreground/25 pt-2">
+                      <div className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide opacity-80">
+                        <Bookmark className="h-3 w-3" />
+                        Bookmark
+                      </div>
+                      <div className="flex gap-2 rounded-md bg-primary-foreground/10 p-2">
+                        {bookmark.imageUrl ? (
+                          // eslint-disable-next-line @next/next/no-img-element -- arbitrary merchant CDN URLs
+                          <img
+                            src={bookmark.imageUrl}
+                            alt=""
+                            className="h-14 w-14 shrink-0 rounded-md object-cover"
+                            loading="lazy"
+                          />
+                        ) : null}
+                        <div className="min-w-0 flex-1 space-y-0.5">
+                          <p className="font-medium leading-snug">
+                            {bookmark.title}
+                          </p>
+                          <p className="font-mono text-[11px] opacity-80">
+                            {bookmark.handle}
+                          </p>
+                          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0 text-xs">
+                            {bookmark.price ? (
+                              <span className="font-medium">
+                                {bookmark.price}
+                              </span>
+                            ) : null}
+                            {bookmark.compareAtPrice ? (
+                              <span className="opacity-70 line-through">
+                                {bookmark.compareAtPrice}
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  {showRalphPayload && (
+                    <div className="mt-2 space-y-3 border-t border-border/30 pt-2">
+                      {parsed.recommendations.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <Zap className="h-3 w-3" />
+                            Recommendations
+                          </div>
+                          {parsed.recommendations.map((rec, ri) => (
+                            <div
+                              key={ri}
+                              className="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-xs"
+                            >
+                              <span className="font-medium">{rec.title}</span>
+                              {rec.price && (
+                                <span className="text-muted-foreground">
+                                  {rec.price}
+                                </span>
+                              )}
+                              {rec.compareAtPrice && (
+                                <span className="text-muted-foreground line-through">
+                                  {rec.compareAtPrice}
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {parsed.links.length > 0 && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <ExternalLink className="h-3 w-3" />
+                            Links
+                          </div>
+                          <ul className="list-none space-y-1 pl-0">
+                            {parsed.links.map((link, li) => (
+                              <li key={li}>
+                                <a
+                                  href={link.url}
+                                  target="_blank"
+                                  rel="noopener noreferrer"
+                                  className="inline-flex items-center gap-1 text-xs text-primary underline-offset-4 hover:underline"
+                                >
+                                  <ExternalLink className="h-3 w-3 shrink-0 opacity-70" />
+                                  {link.label || link.url}
+                                </a>
+                              </li>
+                            ))}
+                          </ul>
+                        </div>
+                      )}
+                      {parsed.questions.length > 0 && (
+                        <div className="space-y-2">
+                          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <ListOrdered className="h-3 w-3" />
+                            Questions
+                          </div>
+                          {parsed.questions.map((q, qi) => (
+                            <div
+                              key={qi}
+                              className="rounded-md border border-border/40 bg-background/40 px-2 py-1.5"
+                            >
+                              {q.prompt && (
+                                <p className="text-xs font-medium">
+                                  {q.prompt}
+                                </p>
+                              )}
+                              {q.options.length > 0 && (
+                                <div className="mt-1.5 flex flex-wrap gap-1">
+                                  {q.options.map((opt, oi) => (
+                                    <Badge
+                                      key={oi}
+                                      variant="secondary"
+                                      className="text-[10px] font-normal"
+                                    >
+                                      {opt}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      {parsed.action && (
+                        <div className="space-y-1">
+                          <div className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                            <MousePointerClick className="h-3 w-3" />
+                            Action
+                          </div>
+                          <div className="space-y-0.5 rounded-md border border-border/40 bg-background/40 px-2 py-1.5 font-mono text-[10px] leading-relaxed">
+                            {Object.entries(parsed.action).map(([k, v]) => (
+                              <div key={k}>
+                                <span className="text-muted-foreground">
+                                  {k}:
+                                </span>{" "}
+                                {typeof v === "object" && v !== null
+                                  ? JSON.stringify(v)
+                                  : String(v)}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                  {!isUser && e.feedback ? (
+                    <MessageFeedbackDetail feedback={e.feedback} />
+                  ) : null}
+                </div>
+              );
+            })}
+            {chatEvents.length === 0 && (
               <div className="py-8 text-center text-sm text-muted-foreground">
                 No messages in this conversation.
               </div>

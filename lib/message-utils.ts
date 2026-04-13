@@ -210,6 +210,8 @@ function parsedFromAssistantJson(
       const inner = parsedFromAssistantJson(nested);
       if (inner) return inner;
     }
+    const proseJson = tryExtractProsePlusTrailingJson(trimmed, x);
+    if (proseJson) return proseJson;
     return { ...emptyParsed(), ...x, text: trimmed };
   }
 
@@ -223,6 +225,42 @@ function parsedFromAssistantJson(
     return { ...emptyParsed(), ...x };
   }
 
+  return null;
+}
+
+/**
+ * Some stores persist assistant output as prose followed by a full JSON object
+ * on the next line(s). `JSON.parse` on the whole string fails; peel off a
+ * trailing `{...}` that parses as an assistant payload.
+ */
+function tryExtractProsePlusTrailingJson(
+  trimmed: string,
+  x: Omit<ParsedMessage, "text">,
+): ParsedMessage | null {
+  const norm = trimmed.replace(/\r\n/g, "\n");
+  let searchEnd = norm.length;
+  while (searchEnd > 0) {
+    const pos = norm.lastIndexOf("\n{", searchEnd - 1);
+    if (pos === -1) break;
+    const jsonSlice = norm.slice(pos + 1).trim();
+    searchEnd = pos;
+    if (!jsonSlice.startsWith("{")) continue;
+    try {
+      const p = JSON.parse(jsonSlice) as unknown;
+      if (!p || typeof p !== "object" || Array.isArray(p)) continue;
+      const inner = parsedFromAssistantJson(p as Record<string, unknown>);
+      if (!inner || !parsedHasContent(inner)) continue;
+      const prose = norm.slice(0, pos).trimEnd();
+      return {
+        ...emptyParsed(),
+        ...x,
+        ...inner,
+        text: mergePreambleWithInner(prose, inner.text),
+      };
+    } catch {
+      /* try an earlier "\n{" boundary */
+    }
+  }
   return null;
 }
 
